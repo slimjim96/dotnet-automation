@@ -3,140 +3,98 @@ using System.Text.Json.Serialization;
 namespace HumanLayerAutomation;
 
 // ============================================================================
-// Session Models
+// Claude CLI Options
 // ============================================================================
 
-public record CreateSessionRequest
+/// <summary>
+/// Options for configuring Claude CLI execution.
+/// </summary>
+public record ClaudeOptions
 {
-    [JsonPropertyName("query")]
-    public required string Query { get; init; }
-
-    [JsonPropertyName("working_dir")]
+    /// <summary>Working directory for the command.</summary>
     public string? WorkingDir { get; init; }
 
-    [JsonPropertyName("model")]
-    public string? Model { get; init; } // "opus", "sonnet", "haiku"
-
-    [JsonPropertyName("max_turns")]
-    public int? MaxTurns { get; init; }
-
-    [JsonPropertyName("auto_accept_edits")]
-    public bool? AutoAcceptEdits { get; init; }
-
-    [JsonPropertyName("dangerously_skip_permissions")]
-    public bool? DangerouslySkipPermissions { get; init; }
-
-    [JsonPropertyName("dangerously_skip_permissions_timeout")]
-    public long? DangerouslySkipPermissionsTimeoutMs { get; init; }
-
-    [JsonPropertyName("system_prompt")]
-    public string? SystemPrompt { get; init; }
-
-    [JsonPropertyName("append_system_prompt")]
-    public string? AppendSystemPrompt { get; init; }
-
-    [JsonPropertyName("allowed_tools")]
-    public List<string>? AllowedTools { get; init; }
-
-    [JsonPropertyName("disallowed_tools")]
-    public List<string>? DisallowedTools { get; init; }
-
-    // Proxy configuration for OpenRouter/other providers
-    [JsonPropertyName("proxy_enabled")]
-    public bool? ProxyEnabled { get; init; }
-
-    [JsonPropertyName("proxy_base_url")]
-    public string? ProxyBaseUrl { get; init; }
-
-    [JsonPropertyName("proxy_model_override")]
-    public string? ProxyModelOverride { get; init; }
-
-    [JsonPropertyName("proxy_api_key")]
-    public string? ProxyApiKey { get; init; }
-
-    [JsonPropertyName("mcp_config")]
-    public McpConfig? McpConfig { get; init; }
-
-    [JsonPropertyName("permission_prompt_tool")]
-    public string? PermissionPromptTool { get; init; }
-}
-
-public record McpConfig
-{
-    [JsonPropertyName("mcpServers")]
-    public Dictionary<string, McpServer>? McpServers { get; init; }
-}
-
-public record McpServer
-{
-    [JsonPropertyName("command")]
-    public string? Command { get; init; }
-
-    [JsonPropertyName("args")]
-    public List<string>? Args { get; init; }
-
-    [JsonPropertyName("env")]
-    public Dictionary<string, string>? Env { get; init; }
-
-    [JsonPropertyName("type")]
-    public string? Type { get; init; }
-
-    [JsonPropertyName("url")]
-    public string? Url { get; init; }
-}
-
-public record CreateSessionResponse
-{
-    [JsonPropertyName("data")]
-    public required CreateSessionData Data { get; init; }
-}
-
-public record CreateSessionData
-{
-    [JsonPropertyName("session_id")]
-    public required string SessionId { get; init; }
-
-    [JsonPropertyName("run_id")]
-    public required string RunId { get; init; }
-}
-
-public record Session
-{
-    [JsonPropertyName("id")]
-    public required string Id { get; init; }
-
-    [JsonPropertyName("run_id")]
-    public string? RunId { get; init; }
-
-    [JsonPropertyName("status")]
-    public required string Status { get; init; }
-
-    [JsonPropertyName("query")]
-    public string? Query { get; init; }
-
-    [JsonPropertyName("title")]
-    public string? Title { get; init; }
-
-    [JsonPropertyName("summary")]
-    public string? Summary { get; init; }
-
-    [JsonPropertyName("model")]
+    /// <summary>Model to use: "opus", "sonnet", or "haiku".</summary>
     public string? Model { get; init; }
 
-    [JsonPropertyName("working_dir")]
-    public string? WorkingDir { get; init; }
+    /// <summary>Maximum number of agent turns.</summary>
+    public int? MaxTurns { get; init; }
 
-    [JsonPropertyName("created_at")]
-    public DateTime CreatedAt { get; init; }
+    /// <summary>Auto-approve all tool uses (dangerous for production).</summary>
+    public bool AutoApprove { get; init; }
 
-    [JsonPropertyName("last_activity_at")]
-    public DateTime? LastActivityAt { get; init; }
+    /// <summary>Output format: "text", "json", or "stream-json".</summary>
+    public string? OutputFormat { get; init; }
 
-    [JsonPropertyName("completed_at")]
-    public DateTime? CompletedAt { get; init; }
+    /// <summary>List of allowed tools (whitelist).</summary>
+    public List<string>? AllowedTools { get; init; }
 
-    [JsonPropertyName("error_message")]
-    public string? ErrorMessage { get; init; }
+    /// <summary>List of disallowed tools (blacklist).</summary>
+    public List<string>? DisallowedTools { get; init; }
+
+    /// <summary>Custom system prompt to use.</summary>
+    public string? SystemPrompt { get; init; }
+
+    /// <summary>Additional instructions to append to system prompt.</summary>
+    public string? AppendSystemPrompt { get; init; }
+
+    /// <summary>Session ID to resume.</summary>
+    public string? ResumeSessionId { get; init; }
+}
+
+// ============================================================================
+// Claude CLI Results
+// ============================================================================
+
+/// <summary>
+/// Result from a Claude CLI execution.
+/// </summary>
+public record ClaudeResult
+{
+    /// <summary>Whether the command succeeded (exit code 0).</summary>
+    public bool Success { get; init; }
+
+    /// <summary>Process exit code.</summary>
+    public int ExitCode { get; init; }
+
+    /// <summary>Standard output from the command.</summary>
+    public string Output { get; init; } = "";
+
+    /// <summary>Standard error from the command.</summary>
+    public string Error { get; init; } = "";
+
+    /// <summary>Duration of the command execution.</summary>
+    public TimeSpan Duration { get; init; }
+
+    /// <summary>Parsed JSON result (when OutputFormat is "json").</summary>
+    public ClaudeJsonResult? JsonResult { get; init; }
+
+    /// <summary>Cost in USD (from JSON output).</summary>
+    public decimal? CostUsd { get; init; }
+
+    /// <summary>Input tokens used.</summary>
+    public int? InputTokens { get; init; }
+
+    /// <summary>Output tokens generated.</summary>
+    public int? OutputTokens { get; init; }
+
+    /// <summary>Session ID for this execution.</summary>
+    public string? SessionId { get; init; }
+}
+
+/// <summary>
+/// JSON output format from Claude CLI with --output-format json.
+/// </summary>
+public record ClaudeJsonResult
+{
+    [JsonPropertyName("session_id")]
+    public string? SessionId { get; init; }
+
+    [JsonPropertyName("result")]
+    public string? Result { get; init; }
+
+    [JsonPropertyName("is_error")]
+    public bool IsError { get; init; }
 
     [JsonPropertyName("cost_usd")]
     public decimal? CostUsd { get; init; }
@@ -150,84 +108,128 @@ public record Session
     [JsonPropertyName("duration_ms")]
     public long? DurationMs { get; init; }
 
-    [JsonPropertyName("archived")]
-    public bool Archived { get; init; }
-
-    [JsonPropertyName("auto_accept_edits")]
-    public bool AutoAcceptEdits { get; init; }
-
-    [JsonPropertyName("dangerously_skip_permissions")]
-    public bool DangerouslySkipPermissions { get; init; }
+    [JsonPropertyName("num_turns")]
+    public int? NumTurns { get; init; }
 }
 
-public record SessionResponse
+/// <summary>
+/// Version information from Claude CLI.
+/// </summary>
+public record ClaudeVersionInfo
 {
-    [JsonPropertyName("data")]
-    public required Session Data { get; init; }
+    public string Version { get; init; } = "";
+    public bool IsAvailable { get; init; }
 }
 
-public record SessionsResponse
+// ============================================================================
+// Task Definition for Automation
+// ============================================================================
+
+/// <summary>
+/// Defines an automation task to run with Claude.
+/// </summary>
+public record AutomationTask
 {
-    [JsonPropertyName("data")]
-    public required List<Session> Data { get; init; }
+    /// <summary>Human-readable name for the task.</summary>
+    public required string Name { get; init; }
 
-    [JsonPropertyName("counts")]
-    public SessionCounts? Counts { get; init; }
-}
-
-public record SessionCounts
-{
-    [JsonPropertyName("normal")]
-    public int Normal { get; init; }
-
-    [JsonPropertyName("archived")]
-    public int Archived { get; init; }
-
-    [JsonPropertyName("draft")]
-    public int Draft { get; init; }
-}
-
-public record ContinueSessionRequest
-{
-    [JsonPropertyName("query")]
+    /// <summary>The prompt/query to send to Claude.</summary>
     public required string Query { get; init; }
+
+    /// <summary>Working directory for the task.</summary>
+    public string? WorkingDir { get; init; }
+
+    /// <summary>Model to use: "opus", "sonnet", or "haiku".</summary>
+    public string? Model { get; init; }
+
+    /// <summary>Maximum number of agent turns.</summary>
+    public int? MaxTurns { get; init; }
+
+    /// <summary>Auto-approve all tool uses (dangerous for production).</summary>
+    public bool AutoApprove { get; init; }
+
+    /// <summary>Timeout for auto-approve (not used in CLI mode).</summary>
+    public TimeSpan? AutoApproveTimeout { get; init; }
+
+    /// <summary>List of allowed tools (whitelist).</summary>
+    public List<string>? AllowedTools { get; init; }
+
+    /// <summary>List of disallowed tools (blacklist).</summary>
+    public List<string>? DisallowedTools { get; init; }
+
+    /// <summary>Custom system prompt.</summary>
+    public string? SystemPrompt { get; init; }
 }
 
-public record ContinueSessionResponse
+/// <summary>
+/// Result from running an automation task.
+/// </summary>
+public record TaskResult
 {
-    [JsonPropertyName("data")]
-    public required ContinueSessionData Data { get; init; }
-}
+    /// <summary>Name of the task that was run.</summary>
+    public required string TaskName { get; init; }
 
-public record ContinueSessionData
-{
-    [JsonPropertyName("session_id")]
+    /// <summary>Session ID from Claude (if available).</summary>
     public required string SessionId { get; init; }
 
-    [JsonPropertyName("run_id")]
-    public required string RunId { get; init; }
+    /// <summary>Final status: "completed", "failed", or "error".</summary>
+    public required string Status { get; init; }
 
-    [JsonPropertyName("parent_session_id")]
-    public string? ParentSessionId { get; init; }
+    /// <summary>Duration of the task execution.</summary>
+    public TimeSpan Duration { get; init; }
+
+    /// <summary>Cost in USD.</summary>
+    public decimal? CostUsd { get; init; }
+
+    /// <summary>Input tokens used.</summary>
+    public int? InputTokens { get; init; }
+
+    /// <summary>Output tokens generated.</summary>
+    public int? OutputTokens { get; init; }
+
+    /// <summary>Error message if failed.</summary>
+    public string? ErrorMessage { get; init; }
+
+    /// <summary>Summary of the result.</summary>
+    public string? Summary { get; init; }
 }
 
 // ============================================================================
-// Approval Models
+// Scheduled Task Models
 // ============================================================================
 
-public record Approval
+/// <summary>
+/// A scheduled task with interval and last run tracking.
+/// </summary>
+public record ScheduledTask
 {
-    [JsonPropertyName("id")]
-    public required string Id { get; init; }
+    /// <summary>The automation task to run.</summary>
+    public required AutomationTask Task { get; init; }
 
-    [JsonPropertyName("run_id")]
-    public string? RunId { get; init; }
+    /// <summary>Interval between runs.</summary>
+    public required TimeSpan Interval { get; init; }
 
-    [JsonPropertyName("session_id")]
-    public string? SessionId { get; init; }
+    /// <summary>Last time the task was run.</summary>
+    public DateTime LastRun { get; set; } = DateTime.MinValue;
 
-    [JsonPropertyName("status")]
-    public required string Status { get; init; } // "pending", "approved", "denied"
+    /// <summary>Whether the task is enabled.</summary>
+    public bool Enabled { get; set; } = true;
+}
+
+// ============================================================================
+// Streaming Event Models
+// ============================================================================
+
+/// <summary>
+/// Event from Claude CLI streaming output.
+/// </summary>
+public record ClaudeStreamEvent
+{
+    [JsonPropertyName("type")]
+    public string Type { get; init; } = "";
+
+    [JsonPropertyName("message")]
+    public string? Message { get; init; }
 
     [JsonPropertyName("tool_name")]
     public string? ToolName { get; init; }
@@ -235,151 +237,71 @@ public record Approval
     [JsonPropertyName("tool_input")]
     public Dictionary<string, object>? ToolInput { get; init; }
 
-    [JsonPropertyName("created_at")]
-    public DateTime CreatedAt { get; init; }
-
-    [JsonPropertyName("responded_at")]
-    public DateTime? RespondedAt { get; init; }
-
-    [JsonPropertyName("comment")]
-    public string? Comment { get; init; }
-}
-
-public record ApprovalResponse
-{
-    [JsonPropertyName("data")]
-    public required Approval Data { get; init; }
-}
-
-public record ApprovalsResponse
-{
-    [JsonPropertyName("data")]
-    public required List<Approval> Data { get; init; }
-}
-
-public record DecideApprovalRequest
-{
-    [JsonPropertyName("decision")]
-    public required string Decision { get; init; } // "approve" or "deny"
-
-    [JsonPropertyName("comment")]
-    public string? Comment { get; init; }
-}
-
-public record DecideApprovalResponse
-{
-    [JsonPropertyName("data")]
-    public required DecideApprovalData Data { get; init; }
-}
-
-public record DecideApprovalData
-{
-    [JsonPropertyName("success")]
-    public bool Success { get; init; }
-
-    [JsonPropertyName("error")]
-    public string? Error { get; init; }
-}
-
-// ============================================================================
-// Conversation Models
-// ============================================================================
-
-public record ConversationEvent
-{
-    [JsonPropertyName("id")]
-    public long Id { get; init; }
+    [JsonPropertyName("tool_result")]
+    public string? ToolResult { get; init; }
 
     [JsonPropertyName("session_id")]
     public string? SessionId { get; init; }
-
-    [JsonPropertyName("sequence")]
-    public int Sequence { get; init; }
-
-    [JsonPropertyName("event_type")]
-    public string? EventType { get; init; } // "message", "tool_call", "tool_result"
-
-    [JsonPropertyName("role")]
-    public string? Role { get; init; } // "user", "assistant", "system"
-
-    [JsonPropertyName("content")]
-    public string? Content { get; init; }
-
-    [JsonPropertyName("tool_name")]
-    public string? ToolName { get; init; }
-
-    [JsonPropertyName("tool_input_json")]
-    public string? ToolInputJson { get; init; }
-
-    [JsonPropertyName("created_at")]
-    public DateTime CreatedAt { get; init; }
-}
-
-public record ConversationResponse
-{
-    [JsonPropertyName("data")]
-    public required List<ConversationEvent> Data { get; init; }
 }
 
 // ============================================================================
-// Health & System Models
+// Tool Permission Models (for custom approval logic)
 // ============================================================================
 
-public record HealthResponse
+/// <summary>
+/// Represents a tool permission request.
+/// </summary>
+public record ToolPermissionRequest
 {
-    [JsonPropertyName("status")]
-    public required string Status { get; init; }
+    /// <summary>Name of the tool requesting permission.</summary>
+    public required string ToolName { get; init; }
 
-    [JsonPropertyName("version")]
-    public string? Version { get; init; }
+    /// <summary>Input parameters for the tool.</summary>
+    public Dictionary<string, object>? ToolInput { get; init; }
+
+    /// <summary>Risk level assessment.</summary>
+    public ToolRiskLevel RiskLevel { get; init; }
 }
 
-// ============================================================================
-// SSE Event Models
-// ============================================================================
-
-public record SseEvent
+/// <summary>
+/// Risk level for tool operations.
+/// </summary>
+public enum ToolRiskLevel
 {
-    [JsonPropertyName("type")]
-    public required string Type { get; init; }
+    /// <summary>Safe read-only operations (Read, Glob, Grep).</summary>
+    Low,
 
-    [JsonPropertyName("timestamp")]
-    public DateTime Timestamp { get; init; }
+    /// <summary>Operations with audit trail (WebFetch).</summary>
+    Medium,
 
-    [JsonPropertyName("data")]
-    public Dictionary<string, object>? Data { get; init; }
+    /// <summary>Dangerous write/execute operations (Bash, Write, Edit).</summary>
+    High
 }
 
-// ============================================================================
-// Task Definition for Automation
-// ============================================================================
-
-public record AutomationTask
+/// <summary>
+/// Tool classification by risk level.
+/// </summary>
+public static class ToolClassification
 {
-    public required string Name { get; init; }
-    public required string Query { get; init; }
-    public string? WorkingDir { get; init; }
-    public string? Model { get; init; }
-    public int? MaxTurns { get; init; }
-    public bool AutoApprove { get; init; }
-    public TimeSpan? AutoApproveTimeout { get; init; }
-    public List<string>? AllowedTools { get; init; }
+    public static readonly HashSet<string> LowRiskTools =
+    [
+        "Read", "Glob", "Grep", "LS", "WebSearch"
+    ];
 
-    // OpenRouter/alternative provider settings
-    public string? ProxyBaseUrl { get; init; }
-    public string? ProxyModel { get; init; }
-    public string? ProxyApiKey { get; init; }
-}
+    public static readonly HashSet<string> MediumRiskTools =
+    [
+        "WebFetch", "Task"
+    ];
 
-public record TaskResult
-{
-    public required string TaskName { get; init; }
-    public required string SessionId { get; init; }
-    public required string Status { get; init; }
-    public TimeSpan Duration { get; init; }
-    public decimal? CostUsd { get; init; }
-    public int? InputTokens { get; init; }
-    public int? OutputTokens { get; init; }
-    public string? ErrorMessage { get; init; }
-    public string? Summary { get; init; }
+    public static readonly HashSet<string> HighRiskTools =
+    [
+        "Bash", "Write", "Edit", "NotebookEdit", "MultiEdit"
+    ];
+
+    public static ToolRiskLevel GetRiskLevel(string toolName)
+    {
+        if (LowRiskTools.Contains(toolName)) return ToolRiskLevel.Low;
+        if (MediumRiskTools.Contains(toolName)) return ToolRiskLevel.Medium;
+        return ToolRiskLevel.High;
+    }
 }

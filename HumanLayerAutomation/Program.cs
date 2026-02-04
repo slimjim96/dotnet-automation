@@ -14,7 +14,8 @@ var logger = loggerFactory.CreateLogger<Program>();
 var mode = args.Length > 0 ? args[0] : "demo";
 
 Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
-Console.WriteLine("║       HumanLayer .NET Automation Examples                    ║");
+Console.WriteLine("║       Claude Code .NET Automation                            ║");
+Console.WriteLine("║       Direct CLI Integration (No Daemon Required)            ║");
 Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
 Console.WriteLine();
 
@@ -25,17 +26,17 @@ try
         case "demo":
             await RunDemoAsync(loggerFactory);
             break;
-        case "batch":
-            await RunBatchProcessorAsync(loggerFactory);
+        case "run":
+            await RunSingleTaskAsync(args, loggerFactory);
             break;
         case "scheduler":
             await RunSchedulerAsync(loggerFactory);
             break;
-        case "monitor":
-            await RunApprovalMonitorAsync(loggerFactory);
-            break;
         case "parallel":
             await RunParallelTasksAsync(loggerFactory);
+            break;
+        case "stream":
+            await RunStreamingDemoAsync(loggerFactory);
             break;
         default:
             ShowUsage();
@@ -50,189 +51,158 @@ catch (Exception ex)
 
 static void ShowUsage()
 {
-    Console.WriteLine("Usage: dotnet run -- <mode>");
+    Console.WriteLine("Usage: dotnet run -- <mode> [options]");
     Console.WriteLine();
     Console.WriteLine("Modes:");
-    Console.WriteLine("  demo       - Quick demonstration of API capabilities");
-    Console.WriteLine("  batch      - Batch approval processor for periodic review");
+    Console.WriteLine("  demo       - Quick demonstration of Claude CLI capabilities");
+    Console.WriteLine("  run        - Run a single task: dotnet run -- run \"your prompt\"");
     Console.WriteLine("  scheduler  - Scheduled task runner (cron-like)");
-    Console.WriteLine("  monitor    - Real-time approval monitor with SSE");
     Console.WriteLine("  parallel   - Run multiple AI tasks in parallel");
+    Console.WriteLine("  stream     - Demo with real-time streaming output");
     Console.WriteLine();
     Console.WriteLine("Environment Variables:");
-    Console.WriteLine("  HUMANLAYER_URL      - Daemon URL (default: http://localhost:7777/api/v1)");
-    Console.WriteLine("  OPENROUTER_API_KEY  - API key for OpenRouter proxy");
-    Console.WriteLine("  WORKING_DIR         - Default working directory for sessions");
+    Console.WriteLine("  CLAUDE_PATH         - Path to claude executable (default: claude)");
+    Console.WriteLine("  WORKING_DIR         - Default working directory");
+    Console.WriteLine("  CLAUDE_MODEL        - Default model (opus, sonnet, haiku)");
+    Console.WriteLine();
+    Console.WriteLine("Examples:");
+    Console.WriteLine("  dotnet run -- demo");
+    Console.WriteLine("  dotnet run -- run \"List files in current directory\"");
+    Console.WriteLine("  dotnet run -- scheduler");
 }
 
 // ============================================================================
-// Demo Mode - Quick API demonstration
+// Demo Mode - Quick CLI demonstration
 // ============================================================================
 static async Task RunDemoAsync(ILoggerFactory loggerFactory)
 {
     Console.WriteLine("=== Demo Mode ===");
-    Console.WriteLine("Demonstrating HumanLayer API capabilities...\n");
+    Console.WriteLine("Demonstrating Claude CLI direct integration...\n");
 
-    var baseUrl = Environment.GetEnvironmentVariable("HUMANLAYER_URL") ?? "http://localhost:7777/api/v1";
-    using var client = new HumanLayerClient(baseUrl, loggerFactory.CreateLogger<HumanLayerClient>());
+    var claudePath = Environment.GetEnvironmentVariable("CLAUDE_PATH") ?? "claude";
+    var workingDir = Environment.GetEnvironmentVariable("WORKING_DIR") ?? Environment.CurrentDirectory;
 
-    // Check daemon health
-    Console.WriteLine("1. Checking daemon health...");
+    using var client = new ClaudeCodeClient(
+        claudePath: claudePath,
+        defaultWorkingDir: workingDir,
+        logger: loggerFactory.CreateLogger<ClaudeCodeClient>());
+
+    // Check if Claude CLI is available
+    Console.WriteLine("1. Checking Claude CLI availability...");
     try
     {
-        var health = await client.HealthAsync();
-        Console.WriteLine($"   Status: {health.Status}, Version: {health.Version ?? "unknown"}");
+        var version = await client.GetVersionAsync();
+        Console.WriteLine($"   Claude CLI: {version.Version}");
     }
-    catch (HttpRequestException)
+    catch (Exception ex)
     {
-        Console.WriteLine("   ERROR: Cannot connect to daemon. Is 'hld' running?");
-        Console.WriteLine("   Start it with: hld daemon start");
+        Console.WriteLine($"   ERROR: Cannot find Claude CLI: {ex.Message}");
+        Console.WriteLine("   Install it with: npm install -g @anthropic/claude-code");
         return;
     }
 
-    // List existing sessions
-    Console.WriteLine("\n2. Listing existing sessions...");
-    var sessions = await client.ListSessionsAsync();
-    Console.WriteLine($"   Found {sessions.Count} active sessions");
+    // Run a simple read-only task
+    Console.WriteLine("\n2. Running a simple read-only task...");
+    Console.WriteLine("   Prompt: \"List the files in the current directory briefly\"");
 
-    foreach (var session in sessions.Take(3))
+    var result = await client.RunAsync(
+        prompt: "List the files in the current directory briefly. Just list the names, no details.",
+        options: new ClaudeOptions
+        {
+            Model = "haiku", // Use cheapest model for demo
+            MaxTurns = 5,
+            AutoApprove = true, // Auto-approve for demo
+            AllowedTools = ["Read", "Glob", "Bash"], // Restrict to safe tools
+            OutputFormat = "json"
+        });
+
+    if (result.Success)
     {
-        Console.WriteLine($"   - [{session.Status}] {session.Id}: {Truncate(session.Query ?? session.Title ?? "No query", 50)}");
+        Console.WriteLine($"   Status: Success");
+        Console.WriteLine($"   Duration: {result.Duration.TotalSeconds:F1}s");
+        if (result.CostUsd.HasValue)
+            Console.WriteLine($"   Cost: ${result.CostUsd:F4}");
+        Console.WriteLine($"   Output: {Truncate(result.Output, 200)}");
+    }
+    else
+    {
+        Console.WriteLine($"   Status: Failed");
+        Console.WriteLine($"   Error: {result.Error}");
     }
 
-    // List pending approvals
-    Console.WriteLine("\n3. Checking pending approvals...");
-    var approvals = await client.GetPendingApprovalsAsync();
-    Console.WriteLine($"   Found {approvals.Count} pending approvals");
-
-    foreach (var approval in approvals.Take(5))
-    {
-        Console.WriteLine($"   - {approval.Id}: {approval.ToolName} (Session: {approval.SessionId})");
-    }
-
-    // Example: Create a simple session (commented out to avoid accidental execution)
-    Console.WriteLine("\n4. Session creation example (dry run):");
-    Console.WriteLine("   Would create session with query: 'List files in current directory'");
-    Console.WriteLine("   To actually run: uncomment the code in Program.cs");
-
-    /*
-    var sessionData = await client.CreateSessionAsync(new CreateSessionRequest
-    {
-        Query = "List the files in the current directory",
-        WorkingDir = Environment.CurrentDirectory,
-        Model = "haiku", // Use cheapest model for demo
-        MaxTurns = 5,
-        DangerouslySkipPermissions = true, // Auto-approve for demo
-        DangerouslySkipPermissionsTimeoutMs = 60000 // 1 minute timeout
-    });
-    Console.WriteLine($"   Created session: {sessionData.SessionId}");
-
-    var finalSession = await client.WaitForSessionAsync(sessionData.SessionId, TimeSpan.FromMinutes(2));
-    Console.WriteLine($"   Final status: {finalSession.Status}");
-    Console.WriteLine($"   Cost: ${finalSession.CostUsd:F4}");
-    */
+    // Example: Code analysis task
+    Console.WriteLine("\n3. Code analysis example (dry run):");
+    Console.WriteLine("   Would analyze: 'Review this codebase for potential issues'");
+    Console.WriteLine("   To actually run: dotnet run -- run \"Review this codebase\"");
 
     Console.WriteLine("\n=== Demo Complete ===");
+    Console.WriteLine("\nNext steps:");
+    Console.WriteLine("  - Run a custom task: dotnet run -- run \"your prompt here\"");
+    Console.WriteLine("  - Start scheduler: dotnet run -- scheduler");
+    Console.WriteLine("  - Run parallel tasks: dotnet run -- parallel");
 }
 
 // ============================================================================
-// Batch Processor - Periodic approval review
+// Single Task Runner
 // ============================================================================
-static async Task RunBatchProcessorAsync(ILoggerFactory loggerFactory)
+static async Task RunSingleTaskAsync(string[] args, ILoggerFactory loggerFactory)
 {
-    Console.WriteLine("=== Batch Approval Processor ===");
-    Console.WriteLine("This mode processes pending approvals in batches.\n");
-
-    var baseUrl = Environment.GetEnvironmentVariable("HUMANLAYER_URL") ?? "http://localhost:7777/api/v1";
-    using var client = new HumanLayerClient(baseUrl, loggerFactory.CreateLogger<HumanLayerClient>());
-
-    var safeTools = new HashSet<string>
+    if (args.Length < 2)
     {
-        "Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch"
-    };
-
-    var cts = new CancellationTokenSource();
-    Console.CancelKeyPress += (_, e) =>
-    {
-        e.Cancel = true;
-        cts.Cancel();
-        Console.WriteLine("\nShutting down...");
-    };
-
-    Console.WriteLine("Processing approvals. Press Ctrl+C to stop.\n");
-    Console.WriteLine("Auto-approving safe tools: " + string.Join(", ", safeTools));
-    Console.WriteLine("Other tools require manual review.\n");
-
-    var batchInterval = TimeSpan.FromSeconds(10);
-    var processedCount = 0;
-    var manualReviewCount = 0;
-
-    while (!cts.Token.IsCancellationRequested)
-    {
-        try
-        {
-            var approvals = await client.GetPendingApprovalsAsync(ct: cts.Token);
-
-            if (approvals.Count > 0)
-            {
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Found {approvals.Count} pending approvals");
-
-                foreach (var approval in approvals)
-                {
-                    var toolName = approval.ToolName ?? "unknown";
-
-                    if (safeTools.Contains(toolName))
-                    {
-                        await client.ApproveAsync(approval.Id, "Auto-approved (safe tool)", cts.Token);
-                        Console.WriteLine($"  ✓ Auto-approved: {approval.Id} ({toolName})");
-                        processedCount++;
-                    }
-                    else
-                    {
-                        Console.WriteLine($"  ⚠ Manual review needed: {approval.Id} ({toolName})");
-                        Console.WriteLine($"    Input: {FormatToolInput(approval.ToolInput)}");
-                        Console.Write("    Approve? (y/n/s=skip): ");
-
-                        var key = Console.ReadKey();
-                        Console.WriteLine();
-
-                        switch (char.ToLower(key.KeyChar))
-                        {
-                            case 'y':
-                                await client.ApproveAsync(approval.Id, "Manually approved", cts.Token);
-                                Console.WriteLine($"    ✓ Approved");
-                                processedCount++;
-                                break;
-                            case 'n':
-                                Console.Write("    Denial reason: ");
-                                var reason = Console.ReadLine() ?? "Denied by operator";
-                                await client.DenyAsync(approval.Id, reason, cts.Token);
-                                Console.WriteLine($"    ✗ Denied");
-                                processedCount++;
-                                break;
-                            default:
-                                Console.WriteLine($"    → Skipped (will review later)");
-                                manualReviewCount++;
-                                break;
-                        }
-                    }
-                }
-            }
-
-            await Task.Delay(batchInterval, cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            break;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error: {ex.Message}");
-            await Task.Delay(5000, cts.Token);
-        }
+        Console.WriteLine("Usage: dotnet run -- run \"your prompt\"");
+        Console.WriteLine();
+        Console.WriteLine("Options (via environment variables):");
+        Console.WriteLine("  CLAUDE_MODEL=haiku|sonnet|opus");
+        Console.WriteLine("  MAX_TURNS=10");
+        Console.WriteLine("  AUTO_APPROVE=true|false");
+        return;
     }
 
-    Console.WriteLine($"\nProcessed {processedCount} approvals, {manualReviewCount} skipped for later.");
+    var prompt = args[1];
+    var model = Environment.GetEnvironmentVariable("CLAUDE_MODEL") ?? "sonnet";
+    var maxTurns = int.TryParse(Environment.GetEnvironmentVariable("MAX_TURNS"), out var mt) ? mt : 20;
+    var autoApprove = Environment.GetEnvironmentVariable("AUTO_APPROVE")?.ToLower() == "true";
+    var workingDir = Environment.GetEnvironmentVariable("WORKING_DIR") ?? Environment.CurrentDirectory;
+
+    Console.WriteLine($"Running task with Claude ({model})...");
+    Console.WriteLine($"Prompt: {Truncate(prompt, 100)}");
+    Console.WriteLine($"Auto-approve: {autoApprove}");
+    Console.WriteLine();
+
+    using var client = new ClaudeCodeClient(
+        defaultWorkingDir: workingDir,
+        logger: loggerFactory.CreateLogger<ClaudeCodeClient>());
+
+    client.DefaultModel = model;
+
+    var result = await client.RunAsync(
+        prompt: prompt,
+        options: new ClaudeOptions
+        {
+            MaxTurns = maxTurns,
+            AutoApprove = autoApprove,
+            OutputFormat = "json"
+        });
+
+    Console.WriteLine($"\n=== Result ===");
+    Console.WriteLine($"Status: {(result.Success ? "Success" : "Failed")}");
+    Console.WriteLine($"Duration: {result.Duration.TotalSeconds:F1}s");
+
+    if (result.CostUsd.HasValue)
+        Console.WriteLine($"Cost: ${result.CostUsd:F4}");
+
+    if (result.InputTokens.HasValue)
+        Console.WriteLine($"Tokens: {result.InputTokens} in / {result.OutputTokens} out");
+
+    Console.WriteLine();
+    Console.WriteLine("Output:");
+    Console.WriteLine(result.Output);
+
+    if (!string.IsNullOrEmpty(result.Error))
+    {
+        Console.WriteLine("\nErrors:");
+        Console.WriteLine(result.Error);
+    }
 }
 
 // ============================================================================
@@ -241,47 +211,59 @@ static async Task RunBatchProcessorAsync(ILoggerFactory loggerFactory)
 static async Task RunSchedulerAsync(ILoggerFactory loggerFactory)
 {
     Console.WriteLine("=== Task Scheduler ===");
-    Console.WriteLine("Running scheduled AI tasks with human oversight.\n");
+    Console.WriteLine("Running scheduled AI tasks.\n");
 
-    var baseUrl = Environment.GetEnvironmentVariable("HUMANLAYER_URL") ?? "http://localhost:7777/api/v1";
     var workingDir = Environment.GetEnvironmentVariable("WORKING_DIR") ?? Environment.CurrentDirectory;
 
-    using var client = new HumanLayerClient(baseUrl, loggerFactory.CreateLogger<HumanLayerClient>());
+    using var client = new ClaudeCodeClient(
+        defaultWorkingDir: workingDir,
+        logger: loggerFactory.CreateLogger<ClaudeCodeClient>());
 
     // Example scheduled tasks
-    var tasks = new List<(TimeSpan interval, AutomationTask task)>
+    var scheduledTasks = new List<ScheduledTask>
     {
-        (TimeSpan.FromHours(1), new AutomationTask
+        new()
         {
-            Name = "Code Review Summary",
-            Query = "Review any new or modified files in this directory and provide a brief summary of changes",
-            WorkingDir = workingDir,
-            Model = "haiku",
-            MaxTurns = 10,
-            AutoApprove = true, // Safe read-only task
-            AutoApproveTimeout = TimeSpan.FromMinutes(5),
-            AllowedTools = ["Read", "Glob", "Grep"]
-        }),
-        (TimeSpan.FromHours(4), new AutomationTask
+            Task = new AutomationTask
+            {
+                Name = "Code Review Summary",
+                Query = "Review any source code files in this directory and provide a brief summary of what the code does",
+                WorkingDir = workingDir,
+                Model = "haiku",
+                MaxTurns = 10,
+                AutoApprove = true,
+                AllowedTools = ["Read", "Glob", "Grep"]
+            },
+            Interval = TimeSpan.FromHours(1)
+        },
+        new()
         {
-            Name = "Security Scan",
-            Query = "Scan for potential security issues, hardcoded secrets, or vulnerable dependencies",
-            WorkingDir = workingDir,
-            Model = "sonnet",
-            MaxTurns = 20,
-            AutoApprove = true,
-            AutoApproveTimeout = TimeSpan.FromMinutes(10),
-            AllowedTools = ["Read", "Glob", "Grep", "Bash(grep*)"] // Limited bash
-        }),
-        (TimeSpan.FromHours(24), new AutomationTask
+            Task = new AutomationTask
+            {
+                Name = "Security Scan",
+                Query = "Scan for potential security issues: hardcoded secrets, SQL injection, XSS vulnerabilities, or unsafe patterns",
+                WorkingDir = workingDir,
+                Model = "sonnet",
+                MaxTurns = 20,
+                AutoApprove = true,
+                AllowedTools = ["Read", "Glob", "Grep"]
+            },
+            Interval = TimeSpan.FromHours(4)
+        },
+        new()
         {
-            Name = "Documentation Update",
-            Query = "Review code and update any outdated documentation or add missing docstrings",
-            WorkingDir = workingDir,
-            Model = "sonnet",
-            MaxTurns = 50,
-            AutoApprove = false, // Requires human approval for edits
-        })
+            Task = new AutomationTask
+            {
+                Name = "Documentation Check",
+                Query = "Check if code documentation is up to date and suggest any missing documentation",
+                WorkingDir = workingDir,
+                Model = "haiku",
+                MaxTurns = 15,
+                AutoApprove = true, // Read-only, safe
+                AllowedTools = ["Read", "Glob", "Grep"]
+            },
+            Interval = TimeSpan.FromHours(24)
+        }
     };
 
     var cts = new CancellationTokenSource();
@@ -292,33 +274,26 @@ static async Task RunSchedulerAsync(ILoggerFactory loggerFactory)
     };
 
     Console.WriteLine("Scheduled tasks:");
-    foreach (var (interval, task) in tasks)
+    foreach (var st in scheduledTasks)
     {
-        Console.WriteLine($"  - {task.Name}: Every {interval.TotalHours}h");
+        Console.WriteLine($"  - {st.Task.Name}: Every {st.Interval.TotalHours}h");
     }
     Console.WriteLine("\nPress Ctrl+C to stop.\n");
-
-    // Track last run times
-    var lastRuns = new Dictionary<string, DateTime>();
-    foreach (var (_, task) in tasks)
-    {
-        lastRuns[task.Name] = DateTime.MinValue;
-    }
 
     while (!cts.Token.IsCancellationRequested)
     {
         var now = DateTime.UtcNow;
 
-        foreach (var (interval, task) in tasks)
+        foreach (var st in scheduledTasks.Where(t => t.Enabled))
         {
-            if (now - lastRuns[task.Name] >= interval)
+            if (now - st.LastRun >= st.Interval)
             {
-                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm}] Running: {task.Name}");
+                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm}] Running: {st.Task.Name}");
 
                 try
                 {
-                    var result = await client.RunTaskAsync(task, cts.Token);
-                    lastRuns[task.Name] = now;
+                    var result = await client.RunTaskAsync(st.Task, cts.Token);
+                    st.LastRun = now;
 
                     Console.WriteLine($"  Status: {result.Status}");
                     Console.WriteLine($"  Duration: {result.Duration.TotalSeconds:F1}s");
@@ -328,63 +303,28 @@ static async Task RunSchedulerAsync(ILoggerFactory loggerFactory)
                         Console.WriteLine($"  Summary: {Truncate(result.Summary, 100)}");
                     Console.WriteLine();
                 }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"  Error: {ex.Message}");
-                    // Don't update last run on error, will retry next cycle
                 }
             }
         }
 
-        await Task.Delay(TimeSpan.FromMinutes(1), cts.Token);
+        try
+        {
+            await Task.Delay(TimeSpan.FromMinutes(1), cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            break;
+        }
     }
-}
 
-// ============================================================================
-// Monitor - Real-time approval monitoring with SSE
-// ============================================================================
-static async Task RunApprovalMonitorAsync(ILoggerFactory loggerFactory)
-{
-    Console.WriteLine("=== Real-time Approval Monitor ===");
-    Console.WriteLine("Watching for approval events via SSE.\n");
-
-    var baseUrl = Environment.GetEnvironmentVariable("HUMANLAYER_URL") ?? "http://localhost:7777/api/v1";
-    using var client = new HumanLayerClient(baseUrl, loggerFactory.CreateLogger<HumanLayerClient>());
-
-    var cts = new CancellationTokenSource();
-    Console.CancelKeyPress += (_, e) =>
-    {
-        e.Cancel = true;
-        cts.Cancel();
-    };
-
-    Console.WriteLine("Listening for events. Press Ctrl+C to stop.\n");
-
-    try
-    {
-        await client.SubscribeToEventsAsync(
-            onEvent: evt =>
-            {
-                var timestamp = evt.Timestamp.ToString("HH:mm:ss");
-                Console.WriteLine($"[{timestamp}] {evt.Type}");
-
-                if (evt.Data != null)
-                {
-                    foreach (var (key, value) in evt.Data)
-                    {
-                        Console.WriteLine($"  {key}: {value}");
-                    }
-                }
-                Console.WriteLine();
-            },
-            eventTypes: ["new_approval", "approval_resolved", "session_status_changed"],
-            ct: cts.Token
-        );
-    }
-    catch (OperationCanceledException)
-    {
-        Console.WriteLine("\nMonitor stopped.");
-    }
+    Console.WriteLine("\nScheduler stopped.");
 }
 
 // ============================================================================
@@ -395,53 +335,46 @@ static async Task RunParallelTasksAsync(ILoggerFactory loggerFactory)
     Console.WriteLine("=== Parallel Task Runner ===");
     Console.WriteLine("Running multiple AI tasks concurrently.\n");
 
-    var baseUrl = Environment.GetEnvironmentVariable("HUMANLAYER_URL") ?? "http://localhost:7777/api/v1";
     var workingDir = Environment.GetEnvironmentVariable("WORKING_DIR") ?? Environment.CurrentDirectory;
-    var openRouterKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
 
-    using var client = new HumanLayerClient(baseUrl, loggerFactory.CreateLogger<HumanLayerClient>());
+    using var client = new ClaudeCodeClient(
+        defaultWorkingDir: workingDir,
+        logger: loggerFactory.CreateLogger<ClaudeCodeClient>());
 
     // Define parallel tasks
     var tasks = new List<AutomationTask>
     {
         new()
         {
-            Name = "Task 1: File Analysis",
-            Query = "Analyze the structure of this codebase and list the main components",
+            Name = "Task 1: File Structure",
+            Query = "Briefly describe the file structure of this project",
             WorkingDir = workingDir,
             Model = "haiku",
             MaxTurns = 10,
             AutoApprove = true,
-            AutoApproveTimeout = TimeSpan.FromMinutes(2)
+            AllowedTools = ["Glob", "Read"]
         },
         new()
         {
-            Name = "Task 2: Dependency Check",
-            Query = "List all external dependencies and their versions",
+            Name = "Task 2: Dependencies",
+            Query = "List the main dependencies of this project",
             WorkingDir = workingDir,
             Model = "haiku",
             MaxTurns = 10,
             AutoApprove = true,
-            AutoApproveTimeout = TimeSpan.FromMinutes(2)
-        }
-    };
-
-    // Optionally add an OpenRouter task
-    if (!string.IsNullOrEmpty(openRouterKey))
-    {
-        tasks.Add(new AutomationTask
+            AllowedTools = ["Read", "Glob"]
+        },
+        new()
         {
-            Name = "Task 3: OpenRouter Analysis",
-            Query = "Provide a high-level overview of this project's purpose",
+            Name = "Task 3: Code Summary",
+            Query = "Provide a one-paragraph summary of what this code does",
             WorkingDir = workingDir,
+            Model = "haiku",
             MaxTurns = 10,
             AutoApprove = true,
-            AutoApproveTimeout = TimeSpan.FromMinutes(2),
-            ProxyBaseUrl = "https://openrouter.ai/api/v1",
-            ProxyModel = "anthropic/claude-3-haiku", // or any OpenRouter model
-            ProxyApiKey = openRouterKey
-        });
-    }
+            AllowedTools = ["Read", "Glob", "Grep"]
+        }
+    };
 
     Console.WriteLine($"Launching {tasks.Count} parallel tasks...\n");
 
@@ -469,11 +402,47 @@ static async Task RunParallelTasksAsync(ILoggerFactory loggerFactory)
         }
         if (!string.IsNullOrEmpty(result.ErrorMessage))
             Console.WriteLine($"  Error: {result.ErrorMessage}");
+        if (!string.IsNullOrEmpty(result.Summary))
+            Console.WriteLine($"  Summary: {Truncate(result.Summary, 150)}");
         Console.WriteLine();
     }
 
     Console.WriteLine($"Total wall-clock time: {totalDuration.TotalSeconds:F1}s");
     Console.WriteLine($"Total cost: ${totalCost:F4}");
+}
+
+// ============================================================================
+// Streaming Demo - Real-time output
+// ============================================================================
+static async Task RunStreamingDemoAsync(ILoggerFactory loggerFactory)
+{
+    Console.WriteLine("=== Streaming Demo ===");
+    Console.WriteLine("Running a task with real-time output streaming.\n");
+
+    var workingDir = Environment.GetEnvironmentVariable("WORKING_DIR") ?? Environment.CurrentDirectory;
+
+    using var client = new ClaudeCodeClient(
+        defaultWorkingDir: workingDir,
+        logger: loggerFactory.CreateLogger<ClaudeCodeClient>());
+
+    Console.WriteLine("Prompt: Explain what this project does in 2-3 sentences.\n");
+    Console.WriteLine("--- Output (streaming) ---");
+
+    var result = await client.RunStreamingAsync(
+        prompt: "Explain what this project does in 2-3 sentences.",
+        onOutput: chunk => Console.Write(chunk),
+        options: new ClaudeOptions
+        {
+            Model = "haiku",
+            MaxTurns = 5,
+            AutoApprove = true,
+            AllowedTools = ["Read", "Glob"]
+        });
+
+    Console.WriteLine("\n--- End Output ---\n");
+
+    Console.WriteLine($"Status: {(result.Success ? "Success" : "Failed")}");
+    Console.WriteLine($"Duration: {result.Duration.TotalSeconds:F1}s");
 }
 
 // ============================================================================
@@ -484,10 +453,4 @@ static string Truncate(string text, int maxLength)
     if (string.IsNullOrEmpty(text)) return "";
     text = text.Replace("\n", " ").Replace("\r", "");
     return text.Length <= maxLength ? text : text[..(maxLength - 3)] + "...";
-}
-
-static string FormatToolInput(Dictionary<string, object>? input)
-{
-    if (input == null || input.Count == 0) return "(empty)";
-    return string.Join(", ", input.Select(kv => $"{kv.Key}={Truncate(kv.Value?.ToString() ?? "", 50)}"));
 }

@@ -1,189 +1,37 @@
-# HumanLayer .NET Automation Client
+# Claude Code .NET Automation
 
-Cross-platform .NET 10 client for automating AI agents with deterministic human oversight.
+Cross-platform .NET 10 client for automating Claude Code CLI directly - no daemon required.
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## What is This?
 
-This is a .NET client library and automation framework for [HumanLayer](https://github.com/humanlayer/humanlayer) - a platform that provides human-in-the-loop capabilities for AI agents.
+A .NET library and automation framework that invokes Claude Code CLI directly as a subprocess. No intermediate daemon or server required - just the Claude CLI and your .NET code.
 
 **Key Features:**
-- Run AI agents (Claude Code) programmatically
-- Queue approvals for periodic human review
-- Schedule 24/7 background automation
-- Support multiple AI providers via OpenRouter
-- Real-time event streaming
+- Direct CLI invocation via `Process` - no daemon needed
+- Run AI tasks programmatically with full control
+- Schedule recurring automation tasks
+- Run multiple tasks in parallel
+- Real-time streaming output
+- Tool restrictions for safety
 
 ```csharp
-// Launch an AI task with human oversight
-var client = new HumanLayerClient();
+// Run an AI task directly
+using var client = new ClaudeCodeClient();
 
-var result = await client.RunTaskAsync(new AutomationTask
-{
-    Name = "Code Review",
-    Query = "Review this codebase for security issues",
-    AutoApprove = false  // All tool uses require human approval
-});
-```
+var result = await client.RunAsync(
+    prompt: "Analyze this codebase for security issues",
+    options: new ClaudeOptions
+    {
+        Model = "sonnet",
+        AutoApprove = true,
+        AllowedTools = ["Read", "Glob", "Grep"]  // Safe read-only tools
+    });
 
-## Why Human Oversight?
-
-AI agents are powerful but make mistakes. For high-stakes operations like:
-- Executing shell commands
-- Modifying production code
-- Sending emails on your behalf
-
-...you need **deterministic human oversight**, not probabilistic accuracy.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Stakes Spectrum                           │
-│                                                              │
-│   LOW              MEDIUM              HIGH                  │
-│   ├────────────────┼────────────────────┤                   │
-│   │                │                    │                    │
-│   ▼                ▼                    ▼                    │
-│ Auto-OK        Audit Trail        Human Approval             │
-│ (Read, Grep)   (WebFetch)        (Bash, Write, Edit)        │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Quick Start
-
-### Prerequisites
-
-1. **.NET 10 SDK**: https://dotnet.microsoft.com/download
-2. **HumanLayer Daemon**: `npm install -g @anthropic/hld`
-3. **Claude Code**: `npm install -g @anthropic/claude-code`
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/humanlayer-dotnet.git
-cd humanlayer-dotnet
-
-# Restore dependencies
-dotnet restore
-
-# Build
-dotnet build
-```
-
-### Run
-
-#### Windows
-
-```powershell
-# Start the HumanLayer daemon
-hld daemon start
-
-# In a new terminal, run the demo from the project directory
-cd HumanLayerAutomation
-dotnet run -- demo
-```
-
-#### Linux / macOS
-
-```bash
-# Start the HumanLayer daemon (background)
-hld daemon start --background
-
-# Or start in foreground to see logs
-hld daemon start
-
-# In another terminal, run the demo from the project directory
-cd HumanLayerAutomation
-dotnet run -- demo
-```
-
-## Automation Modes
-
-All commands below assume you're in the `HumanLayerAutomation/` directory. On **Windows**, use `cd HumanLayerAutomation`, on **Linux/macOS**, use `cd HumanLayerAutomation`.
-
-### Demo Mode
-Quick API demonstration:
-```bash
-dotnet run -- demo
-```
-
-### Batch Processor
-Process pending approvals in batches with periodic human review:
-```bash
-dotnet run -- batch
-```
-- Auto-approves safe tools (Read, Glob, Grep)
-- Prompts for manual review on dangerous operations
-- Runs continuously with configurable intervals
-
-### Task Scheduler
-Run AI tasks on a schedule (cron-like):
-```bash
-dotnet run -- scheduler
-```
-- Hourly code reviews (auto-approved, read-only)
-- Daily security scans (auto-approved with timeout)
-- Weekly documentation updates (requires human approval)
-
-### Event Monitor
-Real-time event streaming via SSE:
-```bash
-dotnet run -- monitor
-```
-
-### Parallel Runner
-Execute multiple AI tasks concurrently:
-```bash
-dotnet run -- parallel
-```
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `HUMANLAYER_URL` | Daemon REST API URL | `http://localhost:7777/api/v1` |
-| `WORKING_DIR` | Default working directory | Current directory |
-| `OPENROUTER_API_KEY` | API key for OpenRouter | (none) |
-
-#### Setting Environment Variables
-
-**Windows (PowerShell):**
-```powershell
-# Temporary (current session only)
-$env:OPENROUTER_API_KEY = "sk-or-..."
-$env:HUMANLAYER_URL = "http://localhost:7777/api/v1"
-
-# Permanent (system-wide)
-[Environment]::SetEnvironmentVariable("OPENROUTER_API_KEY", "sk-or-...", [EnvironmentVariableTarget]::User)
-```
-
-**Linux / macOS:**
-```bash
-# Temporary (current session only)
-export OPENROUTER_API_KEY="sk-or-..."
-export HUMANLAYER_URL="http://localhost:7777/api/v1"
-
-# Permanent (add to ~/.bashrc or ~/.zshrc)
-echo 'export OPENROUTER_API_KEY="sk-or-..."' >> ~/.bashrc
-source ~/.bashrc
-```
-
-### Using Alternative AI Models
-
-Route requests through OpenRouter to use GPT-4, Llama, Mistral, and more:
-
-```csharp
-var task = new AutomationTask
-{
-    Query = "Analyze this codebase",
-    ProxyBaseUrl = "https://openrouter.ai/api/v1",
-    ProxyModel = "openai/gpt-4-turbo",
-    ProxyApiKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY")
-};
+Console.WriteLine($"Result: {result.Output}");
+Console.WriteLine($"Cost: ${result.CostUsd}");
 ```
 
 ## Architecture
@@ -193,158 +41,391 @@ var task = new AutomationTask
 │                    Your .NET Application                     │
 │                                                              │
 │   ┌──────────────────────────────────────────────────────┐  │
-│   │                  HumanLayerClient                     │  │
-│   │  • Session Management  • Approval Handling           │  │
-│   │  • Event Streaming     • Task Orchestration          │  │
+│   │                  ClaudeCodeClient                     │  │
+│   │  • Direct Process invocation                         │  │
+│   │  • JSON output parsing                               │  │
+│   │  • Streaming support                                 │  │
 │   └──────────────────────────┬───────────────────────────┘  │
 └──────────────────────────────┼──────────────────────────────┘
-                               │ HTTP/REST
+                               │ Process.Start()
                                ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                   HumanLayer Daemon (hld)                    │
+│                   Claude Code CLI                            │
+│                   (claude --print ...)                       │
 │                                                              │
-│   Sessions ─────▶ Claude Code ─────▶ AI Work                │
-│   Approvals ────▶ Human Review ────▶ Decisions              │
-│                                                              │
+│   • Read/analyze code     • Execute tools                   │
+│   • JSON output format    • Session management              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-## Documentation
+**Previous architecture (deprecated):**
+```
+.NET App → HTTP REST → HumanLayer Daemon (hld) → Claude Code
+```
 
-| Document | Description |
-|----------|-------------|
-| [Getting Started](docs/getting-started.md) | Installation and setup guide |
-| [Core Concepts](docs/concepts.md) | Terminology and principles |
-| [Architecture](docs/architecture.md) | System design deep dive |
-| [API Reference](docs/api-reference.md) | Complete endpoint documentation |
-| [Automation Patterns](docs/patterns.md) | Best practices and examples |
-| [Security](docs/security.md) | Security considerations |
-| [Roadmap](docs/roadmap.md) | Future development plans |
+**New architecture (current):**
+```
+.NET App → Process.Start() → Claude CLI
+```
+
+## Quick Start
+
+### Prerequisites
+
+1. **.NET 10 SDK**: https://dotnet.microsoft.com/download
+2. **Claude Code CLI**: `npm install -g @anthropic/claude-code`
+3. **Anthropic API Key**: Set `ANTHROPIC_API_KEY` environment variable
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/claude-dotnet-automation.git
+cd claude-dotnet-automation
+
+# Restore and build
+dotnet restore
+dotnet build
+```
+
+### Run
+
+```bash
+cd HumanLayerAutomation
+
+# Run demo
+dotnet run -- demo
+
+# Run a single task
+dotnet run -- run "List files in this directory"
+
+# Run with auto-approve
+AUTO_APPROVE=true dotnet run -- run "Analyze this code"
+
+# Start scheduler
+dotnet run -- scheduler
+
+# Run parallel tasks
+dotnet run -- parallel
+
+# Streaming output demo
+dotnet run -- stream
+```
+
+## Automation Modes
+
+### Demo Mode
+Quick demonstration of Claude CLI integration:
+```bash
+dotnet run -- demo
+```
+
+### Single Task Runner
+Run any prompt as a one-off task:
+```bash
+dotnet run -- run "Your prompt here"
+
+# With options
+CLAUDE_MODEL=opus MAX_TURNS=30 AUTO_APPROVE=true dotnet run -- run "Complex task"
+```
+
+### Task Scheduler
+Run AI tasks on a schedule (cron-like):
+```bash
+dotnet run -- scheduler
+```
+- Hourly code reviews
+- 4-hourly security scans
+- Daily documentation checks
+
+### Parallel Runner
+Execute multiple AI tasks concurrently:
+```bash
+dotnet run -- parallel
+```
+
+### Streaming Demo
+Real-time output streaming:
+```bash
+dotnet run -- stream
+```
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CLAUDE_PATH` | Path to claude executable | `claude` |
+| `WORKING_DIR` | Default working directory | Current directory |
+| `CLAUDE_MODEL` | Default model (opus, sonnet, haiku) | `sonnet` |
+| `MAX_TURNS` | Maximum agent turns | `20` |
+| `AUTO_APPROVE` | Auto-approve all tools | `false` |
+| `ANTHROPIC_API_KEY` | Your Anthropic API key | (required) |
+
+### Setting Environment Variables
+
+**Windows (PowerShell):**
+```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+$env:CLAUDE_MODEL = "haiku"
+$env:AUTO_APPROVE = "true"
+```
+
+**Linux / macOS:**
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+export CLAUDE_MODEL="haiku"
+export AUTO_APPROVE="true"
+```
 
 ## Code Examples
 
-### Fully Automated (Safe Tasks)
+### Basic Task Execution
+
+```csharp
+using var client = new ClaudeCodeClient();
+
+var result = await client.RunAsync(
+    prompt: "What files are in this directory?",
+    options: new ClaudeOptions
+    {
+        Model = "haiku",
+        MaxTurns = 5,
+        AutoApprove = true
+    });
+
+Console.WriteLine(result.Output);
+```
+
+### Safe Read-Only Tasks
+
+```csharp
+var result = await client.RunAsync(
+    prompt: "Analyze code quality",
+    options: new ClaudeOptions
+    {
+        AutoApprove = true,
+        AllowedTools = ["Read", "Glob", "Grep"]  // Only allow safe tools
+    });
+```
+
+### Task with JSON Output
+
+```csharp
+var result = await client.RunAsync(
+    prompt: "Summarize this codebase",
+    options: new ClaudeOptions
+    {
+        OutputFormat = "json",
+        AutoApprove = true
+    });
+
+if (result.JsonResult != null)
+{
+    Console.WriteLine($"Session: {result.JsonResult.SessionId}");
+    Console.WriteLine($"Tokens: {result.JsonResult.InputTokens} in, {result.JsonResult.OutputTokens} out");
+}
+```
+
+### Streaming Output
+
+```csharp
+var result = await client.RunStreamingAsync(
+    prompt: "Explain this code step by step",
+    onOutput: chunk => Console.Write(chunk),
+    options: new ClaudeOptions
+    {
+        Model = "sonnet",
+        AutoApprove = true
+    });
+```
+
+### Using AutomationTask
 
 ```csharp
 var task = new AutomationTask
 {
-    Name = "Code Analysis",
-    Query = "Analyze code quality and identify issues",
+    Name = "Security Scan",
+    Query = "Scan for security vulnerabilities",
+    Model = "sonnet",
+    MaxTurns = 20,
     AutoApprove = true,
-    AutoApproveTimeout = TimeSpan.FromMinutes(5),
-    AllowedTools = new[] { "Read", "Glob", "Grep" }  // Safe tools only
+    AllowedTools = ["Read", "Glob", "Grep"]
 };
 
 var result = await client.RunTaskAsync(task);
+Console.WriteLine($"Status: {result.Status}, Cost: ${result.CostUsd}");
 ```
 
-### Human-in-the-Loop (Sensitive Tasks)
+### Scheduled Tasks
 
 ```csharp
-// Launch task requiring approval
-var session = await client.CreateSessionAsync(new CreateSessionRequest
+var scheduledTasks = new List<ScheduledTask>
 {
-    Query = "Deploy to production",
-    DangerouslySkipPermissions = false
-});
+    new()
+    {
+        Task = new AutomationTask
+        {
+            Name = "Hourly Review",
+            Query = "Review recent changes",
+            AutoApprove = true,
+            AllowedTools = ["Read", "Glob", "Grep"]
+        },
+        Interval = TimeSpan.FromHours(1)
+    }
+};
 
-// Process approvals as they arrive
-var pending = await client.GetPendingApprovalsAsync();
-foreach (var approval in pending)
+// Run scheduler loop
+while (!cancellationToken.IsCancellationRequested)
 {
-    if (IsSafe(approval))
-        await client.ApproveAsync(approval.Id);
-    else
-        await client.DenyAsync(approval.Id, "Requires manual review");
+    foreach (var st in scheduledTasks)
+    {
+        if (DateTime.UtcNow - st.LastRun >= st.Interval)
+        {
+            await client.RunTaskAsync(st.Task);
+            st.LastRun = DateTime.UtcNow;
+        }
+    }
+    await Task.Delay(TimeSpan.FromMinutes(1));
 }
 ```
 
-### Scheduled Automation
+### Parallel Execution
 
 ```csharp
-// Run every hour
-scheduler.Schedule("Hourly Review", TimeSpan.FromHours(1), new AutomationTask
+var tasks = new[]
 {
-    Query = "Review recent code changes",
+    new AutomationTask { Name = "Task 1", Query = "Analyze structure", ... },
+    new AutomationTask { Name = "Task 2", Query = "Check dependencies", ... },
+    new AutomationTask { Name = "Task 3", Query = "Review security", ... }
+};
+
+var results = await Task.WhenAll(tasks.Select(t => client.RunTaskAsync(t)));
+
+foreach (var result in results)
+{
+    Console.WriteLine($"{result.TaskName}: {result.Status}");
+}
+```
+
+## Tool Safety
+
+Claude Code has access to powerful tools. Use restrictions for safety:
+
+| Risk Level | Tools | Recommendation |
+|------------|-------|----------------|
+| Low | Read, Glob, Grep, LS, WebSearch | Safe to auto-approve |
+| Medium | WebFetch, Task | Review before approving |
+| High | Bash, Write, Edit | Require manual approval |
+
+```csharp
+// Safe automation - only allow read operations
+var options = new ClaudeOptions
+{
     AutoApprove = true,
-    AllowedTools = new[] { "Read", "Glob", "Grep" }
-});
+    AllowedTools = ["Read", "Glob", "Grep"]
+};
 
-// Run daily with human approval for changes
-scheduler.Schedule("Daily Update", TimeSpan.FromHours(24), new AutomationTask
+// Or block dangerous tools
+var options = new ClaudeOptions
 {
-    Query = "Update documentation for new features",
-    AutoApprove = false  // Requires approval
-});
-
-await scheduler.RunAsync(cancellationToken);
+    AutoApprove = true,
+    DisallowedTools = ["Bash", "Write", "Edit"]
+};
 ```
 
 ## Project Structure
 
 ```
-humanlayer-dotnet/
-├── HumanLayerAutomation.csproj  # Project file
-├── HumanLayerClient.cs          # REST API client
-├── Models.cs                     # Request/response models
-├── Program.cs                    # CLI and examples
-├── README.md                     # This file
-└── docs/
-    ├── getting-started.md        # Setup guide
-    ├── concepts.md               # Core concepts
-    ├── architecture.md           # System architecture
-    ├── api-reference.md          # API documentation
-    ├── patterns.md               # Best practices
-    ├── security.md               # Security guide
-    └── roadmap.md                # Future plans
+claude-dotnet-automation/
+├── HumanLayerAutomation/
+│   ├── HumanLayerAutomation.csproj  # Project file
+│   ├── ClaudeCodeClient.cs          # CLI wrapper client
+│   ├── Models.cs                     # Data models
+│   └── Program.cs                    # CLI and examples
+├── docs/                             # Documentation
+├── README.md                         # This file
+└── dotnet-automation.sln             # Solution file
 ```
 
 ## API Reference
 
-### Session Methods
+### ClaudeCodeClient
 
 ```csharp
-// Launch new session
-var session = await client.CreateSessionAsync(request);
-
-// Get session details
-var details = await client.GetSessionAsync(sessionId);
-
-// List all sessions
-var sessions = await client.ListSessionsAsync();
-
-// Continue from existing session
-var child = await client.ContinueSessionAsync(sessionId, "Next query");
-
-// Wait for completion
-var result = await client.WaitForSessionAsync(sessionId, timeout);
-```
-
-### Approval Methods
-
-```csharp
-// Get pending approvals
-var pending = await client.GetPendingApprovalsAsync();
-
-// Approve
-await client.ApproveAsync(approvalId, "Looks good");
-
-// Deny
-await client.DenyAsync(approvalId, "Too risky");
-```
-
-### Event Streaming
-
-```csharp
-await client.SubscribeToEventsAsync(
-    onEvent: evt => Console.WriteLine($"{evt.Type}: {evt.Data}"),
-    eventTypes: new[] { "new_approval", "session_status_changed" }
+// Constructor
+var client = new ClaudeCodeClient(
+    claudePath: "claude",           // Path to CLI
+    defaultWorkingDir: ".",         // Working directory
+    logger: logger                  // Optional ILogger
 );
+
+// Check if CLI is available
+var version = await client.GetVersionAsync();
+
+// Run a prompt
+var result = await client.RunAsync(prompt, options);
+
+// Run with streaming
+var result = await client.RunStreamingAsync(prompt, onOutput, options);
+
+// Run an automation task
+var result = await client.RunTaskAsync(task);
+
+// Continue a session
+var result = await client.ContinueSessionAsync(sessionId, prompt, options);
 ```
+
+### ClaudeOptions
+
+```csharp
+new ClaudeOptions
+{
+    WorkingDir = "/path/to/dir",
+    Model = "sonnet",                    // opus, sonnet, haiku
+    MaxTurns = 20,
+    AutoApprove = false,
+    OutputFormat = "json",               // text, json, stream-json
+    AllowedTools = ["Read", "Glob"],
+    DisallowedTools = ["Bash"],
+    SystemPrompt = "Custom instructions",
+    AppendSystemPrompt = "Additional instructions",
+    ResumeSessionId = "session-id"
+}
+```
+
+### ClaudeResult
+
+```csharp
+result.Success       // bool - exit code 0
+result.ExitCode      // int
+result.Output        // string - stdout
+result.Error         // string - stderr
+result.Duration      // TimeSpan
+result.CostUsd       // decimal?
+result.InputTokens   // int?
+result.OutputTokens  // int?
+result.SessionId     // string?
+result.JsonResult    // ClaudeJsonResult? - parsed JSON output
+```
+
+## Migration from HumanLayer Daemon
+
+If you were using the previous daemon-based approach:
+
+| Old (daemon) | New (direct CLI) |
+|--------------|------------------|
+| `hld daemon start` | Not needed |
+| `HumanLayerClient` | `ClaudeCodeClient` |
+| `CreateSessionAsync` | `RunAsync` |
+| `GetPendingApprovalsAsync` | Use `AutoApprove` or `AllowedTools` |
+| SSE streaming | `RunStreamingAsync` |
+| `HUMANLAYER_URL` | `CLAUDE_PATH` |
 
 ## Contributing
 
-Contributions are welcome! See [docs/roadmap.md](docs/roadmap.md) for contribution opportunities.
+Contributions welcome!
 
 1. Fork the repository
 2. Create a feature branch
@@ -357,12 +438,5 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ## Related Projects
 
-- [HumanLayer](https://github.com/humanlayer/humanlayer) - Core platform
-- [Claude Code](https://claude.ai/code) - AI coding assistant
-- [OpenRouter](https://openrouter.ai) - Multi-model gateway
-
-## Support
-
-- **Issues**: https://github.com/humanlayer/humanlayer/issues
-- **Discussions**: https://github.com/humanlayer/humanlayer/discussions
-- **Documentation**: https://humanlayer.dev/docs
+- [Claude Code](https://claude.ai/code) - AI coding assistant CLI
+- [Anthropic API](https://docs.anthropic.com) - Claude API documentation
