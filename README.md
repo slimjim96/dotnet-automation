@@ -74,28 +74,44 @@ dotnet build
 
 ### Run
 
-```bash
+#### Windows
+
+```powershell
 # Start the HumanLayer daemon
 hld daemon start
 
-# Run the demo from the project directory
+# In a new terminal, run the demo from the project directory
+cd HumanLayerAutomation
+dotnet run -- demo
+```
+
+#### Linux / macOS
+
+```bash
+# Start the HumanLayer daemon (background)
+hld daemon start --background
+
+# Or start in foreground to see logs
+hld daemon start
+
+# In another terminal, run the demo from the project directory
 cd HumanLayerAutomation
 dotnet run -- demo
 ```
 
 ## Automation Modes
 
+All commands below assume you're in the `HumanLayerAutomation/` directory. On **Windows**, use `cd HumanLayerAutomation`, on **Linux/macOS**, use `cd HumanLayerAutomation`.
+
 ### Demo Mode
 Quick API demonstration:
 ```bash
-cd HumanLayerAutomation
 dotnet run -- demo
 ```
 
 ### Batch Processor
 Process pending approvals in batches with periodic human review:
 ```bash
-cd HumanLayerAutomation
 dotnet run -- batch
 ```
 - Auto-approves safe tools (Read, Glob, Grep)
@@ -132,6 +148,29 @@ dotnet run -- parallel
 | `HUMANLAYER_URL` | Daemon REST API URL | `http://localhost:7777/api/v1` |
 | `WORKING_DIR` | Default working directory | Current directory |
 | `OPENROUTER_API_KEY` | API key for OpenRouter | (none) |
+
+#### Setting Environment Variables
+
+**Windows (PowerShell):**
+```powershell
+# Temporary (current session only)
+$env:OPENROUTER_API_KEY = "sk-or-..."
+$env:HUMANLAYER_URL = "http://localhost:7777/api/v1"
+
+# Permanent (system-wide)
+[Environment]::SetEnvironmentVariable("OPENROUTER_API_KEY", "sk-or-...", [EnvironmentVariableTarget]::User)
+```
+
+**Linux / macOS:**
+```bash
+# Temporary (current session only)
+export OPENROUTER_API_KEY="sk-or-..."
+export HUMANLAYER_URL="http://localhost:7777/api/v1"
+
+# Permanent (add to ~/.bashrc or ~/.zshrc)
+echo 'export OPENROUTER_API_KEY="sk-or-..."' >> ~/.bashrc
+source ~/.bashrc
+```
 
 ### Using Alternative AI Models
 
