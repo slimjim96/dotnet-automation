@@ -129,6 +129,7 @@ dotnet build
 
 ### Test Connectivity
 ```bash
+cd HumanLayerAutomation
 dotnet run -- demo
 ```
 
@@ -155,7 +156,8 @@ Demonstrating HumanLayer API capabilities...
 
 ### Run a Simple Task
 ```bash
-# Set your working directory
+# Set your working directory (from project root)
+cd HumanLayerAutomation
 export WORKING_DIR="/path/to/your/project"
 
 # Run with auto-approve for safe demo
@@ -286,7 +288,47 @@ Console.WriteLine($"Completed: {session.Status}");
 
 ---
 
-## Common Issues
+## Project Structure
+
+```
+humanlayer-dotnet/
+├── HumanLayerAutomation/          # Main project directory
+│   ├── HumanLayerAutomation.csproj # Project file
+│   ├── Program.cs                 # Application entry point
+│   ├── HumanLayerClient.cs        # API client implementation
+│   ├── Models.cs                  # Data models
+│   ├── bin/                       # Build output (ignored by git)
+│   └── obj/                       # Build artifacts (ignored by git)
+├── docs/                          # Documentation
+│   ├── getting-started.md         # This file
+│   ├── architecture.md            # System architecture
+│   ├── concepts.md                # Core concepts
+│   ├── patterns.md                # Common patterns
+│   ├── security.md                # Security guidelines
+│   ├── api-reference.md           # API documentation
+│   └── roadmap.md                 # Project roadmap
+├── dotnet-automation.sln          # Solution file (entry point for builds)
+├── README.md                      # Project overview
+└── .gitignore                     # Git ignore rules (.NET specific)
+```
+
+### Running Commands
+
+All `dotnet run` commands must be executed from the `HumanLayerAutomation/` directory:
+
+```bash
+# ✓ Correct - Running from project directory
+cd HumanLayerAutomation
+dotnet run -- demo
+
+# ✓ Also correct - Running from solution root with project specification
+dotnet run --project HumanLayerAutomation -- demo
+
+# ✗ Incorrect - Running from solution root without specification
+dotnet run -- demo  # Error: multiple projects found
+```
+
+---
 
 ### Daemon not running
 ```

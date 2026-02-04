@@ -65,6 +65,9 @@ AI agents are powerful but make mistakes. For high-stakes operations like:
 git clone https://github.com/yourusername/humanlayer-dotnet.git
 cd humanlayer-dotnet
 
+# Restore dependencies
+dotnet restore
+
 # Build
 dotnet build
 ```
@@ -75,7 +78,8 @@ dotnet build
 # Start the HumanLayer daemon
 hld daemon start
 
-# Run the demo
+# Run the demo from the project directory
+cd HumanLayerAutomation
 dotnet run -- demo
 ```
 
@@ -84,12 +88,14 @@ dotnet run -- demo
 ### Demo Mode
 Quick API demonstration:
 ```bash
+cd HumanLayerAutomation
 dotnet run -- demo
 ```
 
 ### Batch Processor
 Process pending approvals in batches with periodic human review:
 ```bash
+cd HumanLayerAutomation
 dotnet run -- batch
 ```
 - Auto-approves safe tools (Read, Glob, Grep)
