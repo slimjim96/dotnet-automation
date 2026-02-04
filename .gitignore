@@ -1,0 +1,107 @@
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio cache/options
+.vs/
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.VC.opendb
+
+# Build folder
+/bin/
+/obj/
+
+# NuGet Packages
+*.nupkg
+*.snupkg
+*.nuget.props
+*.nuget.targets
+.nuget/
+
+# NuGet package restore
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Local NuGet package
+packages/
+
+# Resharper
+.idea/
+*.DotSettings
+*.DotSettings.user
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.sln.iml
+
+# Rider
+.idea/
+*.sln.iml
+*.jb6
+
+# Rider IDE
+/ideaProject/
+
+# Test Results
+TestResults/
+*.trx
+
+# StyleCop
+StyleCopViolations.xml
+
+# ReSharper is a .NET coding add-in
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.sln.iml
+
+# Cake
+tools/
+
+# OpenCover UI analysis
+OpenCover/
+
+# BenchmarkDotNet
+BenchmarkDotNet.Artifacts/
+
+# Node Modules (if using Node tools)
+node_modules/
+npm-debug.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Rider specific
+.idea/
+*.sln.iml
+
+# Local environment overrides
+local.settings.json
