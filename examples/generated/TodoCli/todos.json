@@ -1,0 +1,23 @@
+[
+  {
+    "Id": 1,
+    "Task": "Buy groceries",
+    "IsCompleted": true,
+    "Priority": 2,
+    "CreatedAt": "2026-02-05T11:46:37.1058542-05:00"
+  },
+  {
+    "Id": 2,
+    "Task": "Walk the dog",
+    "IsCompleted": false,
+    "Priority": 1,
+    "CreatedAt": "2026-02-05T11:46:44.8411887-05:00"
+  },
+  {
+    "Id": 3,
+    "Task": "Watch movie",
+    "IsCompleted": false,
+    "Priority": 0,
+    "CreatedAt": "2026-02-05T11:46:47.2045687-05:00"
+  }
+]

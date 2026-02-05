@@ -1,0 +1,16 @@
+{
+  "id": "calc001",
+  "name": "Build Simple Calculator",
+  "description": "A command-line calculator with add, subtract, multiply, divide operations",
+  "targetPath": "./generated/CalcFromConfig",
+  "scenario": "NewRepo",
+  "strategy": "Efficiency",
+  "scope": "FullBuild",
+  "model": "sonnet",
+  "maxCostUsd": 0.50,
+  "maxRetries": 3,
+  "maxBuildFixes": 3,
+  "autonomous": true,
+  "additionalContext": "Accept two numbers and an operation as command line arguments. Example: calc add 5 3 should output 8",
+  "tags": ["demo", "calculator", "cli"]
+}

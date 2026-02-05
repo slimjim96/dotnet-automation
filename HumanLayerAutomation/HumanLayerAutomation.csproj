@@ -14,4 +14,11 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
   </ItemGroup>
 
+  <!-- Exclude generated output from compilation -->
+  <ItemGroup>
+    <Compile Remove="generated\**" />
+    <Content Remove="generated\**" />
+    <None Remove="generated\**" />
+  </ItemGroup>
+
 </Project>
