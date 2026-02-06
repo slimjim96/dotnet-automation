@@ -16,9 +16,15 @@
 
   <!-- Exclude generated output from compilation -->
   <ItemGroup>
-    <Compile Remove="generated\**" />
-    <Content Remove="generated\**" />
-    <None Remove="generated\**" />
+    <Compile Remove="generated\**\*" />
+    <Content Remove="generated\**\*" />
+    <None Remove="generated\**\*" />
+    <EmbeddedResource Remove="generated\**\*" />
+  </ItemGroup>
+
+  <!-- Explicitly exclude any nested projects -->
+  <ItemGroup>
+    <ProjectReference Remove="generated\**\*.csproj" />
   </ItemGroup>
 
 </Project>

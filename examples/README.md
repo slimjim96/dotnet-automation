@@ -9,11 +9,12 @@ This folder contains examples showing how to use the Claude Code .NET automation
 # Install .NET 10
 winget install Microsoft.DotNet.SDK.10
 
-# Install Claude Code CLI
-npm install -g @anthropic/claude-code
+# Install Claude Code CLI (native binary)
+irm https://claude.ai/install.ps1 | iex
 
-# Authenticate
-claude auth
+# Verify and authenticate (opens browser)
+claude --version
+claude
 ```
 
 ### Linux/macOS
@@ -21,11 +22,12 @@ claude auth
 # Install .NET 10
 curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 10.0
 
-# Install Claude Code CLI
-npm install -g @anthropic/claude-code
+# Install Claude Code CLI (native binary)
+curl -fsSL https://claude.ai/install.sh | bash
 
-# Authenticate
-claude auth
+# Verify and authenticate (opens browser)
+claude --version
+claude
 ```
 
 ---
@@ -232,7 +234,11 @@ This ensures human oversight for any potentially destructive operations.
 ```
 Error: Cannot find Claude CLI
 ```
-**Fix**: Install with `npm install -g @anthropic/claude-code` and run `claude auth`
+**Fix**: Install Claude Code:
+- **Windows**: `irm https://claude.ai/install.ps1 | iex`
+- **Linux/macOS**: `curl -fsSL https://claude.ai/install.sh | bash`
+
+Then run `claude` to authenticate via browser.
 
 ### Permission denied
 ```

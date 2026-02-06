@@ -73,8 +73,22 @@ Console.WriteLine($"Cost: ${result.CostUsd}");
 ### Prerequisites
 
 1. **.NET 10 SDK**: https://dotnet.microsoft.com/download
-2. **Claude Code CLI**: `npm install -g @anthropic/claude-code`
-3. **Anthropic API Key**: Set `ANTHROPIC_API_KEY` environment variable
+2. **Claude Code CLI**: Native binary (see installation below)
+3. **Claude Account**: Claude Pro, Teams, or Enterprise subscription
+
+### Install Claude Code CLI
+
+**macOS / Linux:**
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://claude.ai/install.ps1 | iex
+```
+
+After installation, authenticate by running `claude` and following the OAuth flow.
 
 ### Installation
 
@@ -161,7 +175,6 @@ dotnet run -- stream
 | `CLAUDE_MODEL` | Default model (opus, sonnet, haiku) | `sonnet` |
 | `MAX_TURNS` | Maximum agent turns | `20` |
 | `AUTO_APPROVE` | Auto-approve all tools | `false` |
-| `ANTHROPIC_API_KEY` | Your Anthropic API key | (required) |
 
 ### Setting Environment Variables
 

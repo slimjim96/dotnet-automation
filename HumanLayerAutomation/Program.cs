@@ -1,5 +1,9 @@
 using Microsoft.Extensions.Logging;
 using HumanLayerAutomation;
+using HumanLayerAutomation.Health;
+using HumanLayerAutomation.Models;
+using HumanLayerAutomation.Notifications;
+using HumanLayerAutomation.Providers;
 
 // Configure logging
 using var loggerFactory = LoggerFactory.Create(builder =>
@@ -56,6 +60,30 @@ try
         case "run-config":
             await RunFromConfigAsync(args, loggerFactory);
             break;
+        case "models":
+            HandleModelsCommand(args);
+            break;
+        case "providers":
+            await HandleProvidersCommandAsync(args, loggerFactory);
+            break;
+        case "costs":
+            HandleCostsCommand(args);
+            break;
+        case "quota":
+            HandleQuotaCommand(args);
+            break;
+        case "notify":
+            await HandleNotifyCommandAsync(args);
+            break;
+        case "health":
+            await HandleHealthCommandAsync(args);
+            break;
+        case "status":
+            await HandleStatusCommandAsync();
+            break;
+        case "setup":
+            await HandleSetupCommandAsync();
+            break;
         default:
             ShowUsage();
             break;
@@ -100,6 +128,34 @@ static void ShowUsage()
     Console.WriteLine("  tasks                   - List all tracked tasks");
     Console.WriteLine("  tasks status <id>       - Show status of a specific task");
     Console.WriteLine("  tasks clear             - Clear completed tasks from registry");
+    Console.WriteLine();
+    Console.WriteLine("Admin Commands:");
+    Console.WriteLine("  models                  - List all registered models");
+    Console.WriteLine("  models coding           - List models optimized for coding");
+    Console.WriteLine("  models update <id>      - Update model pricing");
+    Console.WriteLine("  providers               - Check provider availability");
+    Console.WriteLine("  costs                   - Show usage costs summary");
+    Console.WriteLine("  costs today             - Show today's costs");
+    Console.WriteLine("  costs reset             - Reset usage tracking");
+    Console.WriteLine("  quota                   - Show all provider quotas and metrics");
+    Console.WriteLine("  quota <provider>        - Show quota for specific provider");
+    Console.WriteLine("  quota set <provider>    - Configure provider quota settings");
+    Console.WriteLine("  quota reset <provider>  - Reset quota window/month");
+    Console.WriteLine();
+    Console.WriteLine("Notification Commands:");
+    Console.WriteLine("  notify                  - Show notification status");
+    Console.WriteLine("  notify test             - Send test notifications");
+    Console.WriteLine("  notify enable <channel> - Enable channel (email, discord, ntfy)");
+    Console.WriteLine("  notify disable <channel>- Disable a channel");
+    Console.WriteLine("  notify config           - Show notification configuration");
+    Console.WriteLine();
+    Console.WriteLine("Health & Status:");
+    Console.WriteLine("  status                  - Quick system status (providers, quotas, notifications)");
+    Console.WriteLine("  setup                   - Interactive setup wizard (cross-platform)");
+    Console.WriteLine("  health                  - Full health check (all providers)");
+    Console.WriteLine("  health claude           - Check Claude CLI status");
+    Console.WriteLine("  health github           - Check GitHub CLI/Copilot status");
+    Console.WriteLine("  health openai           - Check OpenAI API status");
     Console.WriteLine();
     Console.WriteLine("Environment Variables:");
     Console.WriteLine("  CLAUDE_PATH         - Path to claude executable (default: claude)");
@@ -686,6 +742,750 @@ static string ExtractAppName(string description)
 
 static bool IsCommonWord(string word) =>
     word.ToLower() is "the" or "with" or "that" or "this" or "from" or "have" or "create" or "make" or "build";
+
+// ============================================================================
+// Admin Commands - Model and Provider Management
+// ============================================================================
+static void HandleModelsCommand(string[] args)
+{
+    var registry = new ModelRegistry();
+    var subCommand = args.Length > 1 ? args[1].ToLower() : "list";
+
+    switch (subCommand)
+    {
+        case "list":
+            var models = registry.GetAllModels();
+            Console.WriteLine("Registered Models:");
+            Console.WriteLine("─".PadRight(100, '─'));
+            Console.WriteLine($"{"ID",-35} {"Provider",-12} {"Coding",-8} {"In/1M",-10} {"Out/1M",-10} {"Enabled"}");
+            Console.WriteLine("─".PadRight(100, '─'));
+
+            foreach (var m in models.OrderByDescending(x => x.CodingPriority))
+            {
+                var enabled = m.Enabled ? "Yes" : "No";
+                Console.WriteLine($"{m.Id,-35} {m.Provider,-12} {m.CodingPriority,-8} ${m.CostPerMillionInput,-9:F2} ${m.CostPerMillionOutput,-9:F2} {enabled}");
+            }
+            break;
+
+        case "coding":
+            var codingModels = registry.GetCodingModels();
+            Console.WriteLine("Models Optimized for Coding (by priority):");
+            Console.WriteLine("─".PadRight(90, '─'));
+
+            foreach (var cm in codingModels)
+            {
+                Console.WriteLine($"  [{cm.CodingPriority,3}] {cm.DisplayName,-25} ({cm.Provider})");
+                Console.WriteLine($"        Cost: ${cm.CostPerMillionInput}/M in, ${cm.CostPerMillionOutput}/M out");
+                if (!string.IsNullOrEmpty(cm.Notes))
+                    Console.WriteLine($"        {cm.Notes}");
+                Console.WriteLine();
+            }
+            break;
+
+        case "update":
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: models update <model-id>");
+                return;
+            }
+            var modelId = args[2];
+            var model = registry.GetModel(modelId) ?? registry.GetModelByAlias(modelId);
+            if (model == null)
+            {
+                Console.WriteLine($"Model not found: {modelId}");
+                return;
+            }
+
+            Console.WriteLine($"Updating: {model.DisplayName} ({model.Id})");
+            Console.WriteLine($"Current pricing: ${model.CostPerMillionInput}/M input, ${model.CostPerMillionOutput}/M output");
+
+            Console.Write("New input cost per million (or Enter to skip): ");
+            var inputStr = Console.ReadLine();
+            Console.Write("New output cost per million (or Enter to skip): ");
+            var outputStr = Console.ReadLine();
+
+            if (decimal.TryParse(inputStr, out var newInput) || decimal.TryParse(outputStr, out var newOutput))
+            {
+                registry.UpdatePricing(
+                    model.Id,
+                    decimal.TryParse(inputStr, out newInput) ? newInput : model.CostPerMillionInput,
+                    decimal.TryParse(outputStr, out newOutput) ? newOutput : model.CostPerMillionOutput);
+                Console.WriteLine("Pricing updated.");
+            }
+            break;
+
+        case "enable":
+        case "disable":
+            if (args.Length < 3)
+            {
+                Console.WriteLine($"Usage: models {subCommand} <model-id>");
+                return;
+            }
+            var targetId = args[2];
+            registry.SetModelEnabled(targetId, subCommand == "enable");
+            Console.WriteLine($"Model {targetId} {subCommand}d.");
+            break;
+
+        case "add":
+            Console.WriteLine("Adding new model...");
+            Console.Write("Model ID: ");
+            var newId = Console.ReadLine() ?? "";
+            Console.Write("Provider (anthropic/github/openai): ");
+            var provider = Console.ReadLine() ?? "";
+            Console.Write("Display name: ");
+            var displayName = Console.ReadLine() ?? "";
+            Console.Write("Aliases (comma-separated): ");
+            var aliasesStr = Console.ReadLine() ?? "";
+            Console.Write("Input cost per million tokens: ");
+            var inputCost = decimal.TryParse(Console.ReadLine(), out var ic) ? ic : 0;
+            Console.Write("Output cost per million tokens: ");
+            var outputCost = decimal.TryParse(Console.ReadLine(), out var oc) ? oc : 0;
+            Console.Write("Coding priority (0-100): ");
+            var priority = int.TryParse(Console.ReadLine(), out var p) ? p : 50;
+
+            registry.UpsertModel(new ModelInfo
+            {
+                Id = newId,
+                Provider = provider,
+                DisplayName = displayName,
+                Aliases = aliasesStr.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(a => a.Trim()).ToList(),
+                CostPerMillionInput = inputCost,
+                CostPerMillionOutput = outputCost,
+                CodingPriority = priority,
+                Capabilities = ["coding"]
+            });
+            Console.WriteLine("Model added.");
+            break;
+
+        default:
+            Console.WriteLine("Model Commands:");
+            Console.WriteLine("  models              - List all models");
+            Console.WriteLine("  models coding       - List coding-optimized models");
+            Console.WriteLine("  models update <id>  - Update model pricing");
+            Console.WriteLine("  models enable <id>  - Enable a model");
+            Console.WriteLine("  models disable <id> - Disable a model");
+            Console.WriteLine("  models add          - Add a new model");
+            break;
+    }
+}
+
+static async Task HandleProvidersCommandAsync(string[] args, ILoggerFactory loggerFactory)
+{
+    var registry = new ModelRegistry();
+    var quotaManager = new QuotaManager();
+
+    using var claudeClient = new ClaudeCodeClient(logger: loggerFactory.CreateLogger<ClaudeCodeClient>());
+
+    var multiProvider = MultiProvider.CreateDefault(claudeClient, registry, quotaManager, loggerFactory);
+
+    Console.WriteLine("Checking provider availability...");
+    Console.WriteLine();
+
+    var status = await multiProvider.GetProviderStatusAsync();
+
+    Console.WriteLine("Provider Status:");
+    Console.WriteLine("─".PadRight(50, '─'));
+
+    foreach (var (providerId, available) in status)
+    {
+        var statusStr = available ? "✓ Available" : "✗ Not available";
+        var color = available ? ConsoleColor.Green : ConsoleColor.Red;
+
+        Console.Write($"  {providerId,-15} ");
+        var prevColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.WriteLine(statusStr);
+        Console.ForegroundColor = prevColor;
+    }
+
+    Console.WriteLine();
+
+    // Show quota info
+    var quota = await multiProvider.GetQuotaAsync();
+    if (quota != null)
+    {
+        Console.WriteLine("Quota:");
+        if (quota.IsUnlimited)
+            Console.WriteLine("  Unlimited (subscription-based or no limit set)");
+        else if (quota.RemainingBudget.HasValue)
+            Console.WriteLine($"  Remaining budget: ${quota.RemainingBudget:F2}");
+    }
+}
+
+static void HandleCostsCommand(string[] args)
+{
+    var registry = new ModelRegistry();
+    var subCommand = args.Length > 1 ? args[1].ToLower() : "summary";
+
+    switch (subCommand)
+    {
+        case "summary":
+        case "all":
+            var allSummary = registry.GetUsageSummary();
+            PrintCostSummary("All Time", allSummary, registry);
+            break;
+
+        case "today":
+            var todaySummary = registry.GetUsageSummary(DateTime.Today);
+            PrintCostSummary("Today", todaySummary, registry);
+            break;
+
+        case "week":
+            var weekSummary = registry.GetUsageSummary(DateTime.Today.AddDays(-7));
+            PrintCostSummary("Last 7 Days", weekSummary, registry);
+            break;
+
+        case "month":
+            var monthSummary = registry.GetUsageSummary(DateTime.Today.AddDays(-30));
+            PrintCostSummary("Last 30 Days", monthSummary, registry);
+            break;
+
+        case "reset":
+            Console.Write("Are you sure you want to reset usage tracking? (y/N): ");
+            if (Console.ReadLine()?.ToLower() == "y")
+            {
+                // Recreate registry to clear usage
+                var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                var path = Path.Combine(appData, "dotnet-automation", "model-registry.json");
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                    Console.WriteLine("Usage tracking reset.");
+                }
+            }
+            break;
+
+        default:
+            Console.WriteLine("Cost Commands:");
+            Console.WriteLine("  costs              - Show all-time summary");
+            Console.WriteLine("  costs today        - Show today's costs");
+            Console.WriteLine("  costs week         - Show last 7 days");
+            Console.WriteLine("  costs month        - Show last 30 days");
+            Console.WriteLine("  costs reset        - Reset usage tracking");
+            break;
+    }
+}
+
+static void HandleQuotaCommand(string[] args)
+{
+    var quotaManager = new QuotaManager();
+    var subCommand = args.Length > 1 ? args[1].ToLower() : "list";
+
+    // Check if it's a provider name
+    var providerQuota = quotaManager.GetProviderQuota(subCommand);
+    if (providerQuota != null)
+    {
+        // Show specific provider
+        PrintProviderQuota(providerQuota, quotaManager);
+        return;
+    }
+
+    switch (subCommand)
+    {
+        case "list":
+        case "all":
+            var metrics = quotaManager.GetAllMetrics();
+            Console.WriteLine("Provider Quotas:");
+            Console.WriteLine("─".PadRight(80, '─'));
+
+            foreach (var m in metrics)
+            {
+                var quota = quotaManager.GetProviderQuota(m.ProviderId);
+                if (quota == null) continue;
+
+                Console.WriteLine($"\n{quota.DisplayName} ({quota.ProviderId}) - {quota.BillingModel}");
+
+                switch (quota.BillingModel)
+                {
+                    case BillingModel.TimeBasedReset:
+                        var timeLeft = quotaManager.GetTimeUntilReset(m.ProviderId);
+                        var pct = quota.TokensPerWindow > 0 ? (m.CurrentWindowUsage * 100.0 / quota.TokensPerWindow) : 0;
+                        Console.WriteLine($"  Window: {m.CurrentWindowUsage:N0} / {m.WindowLimit:N0} tokens ({pct:F1}%)");
+                        Console.WriteLine($"  Resets in: {timeLeft:hh\\:mm\\:ss}");
+                        break;
+
+                    case BillingModel.MonthlyLimit:
+                        var monthPct = quota.MonthlyLimit > 0 ? (m.CurrentMonthUsage * 100.0 / quota.MonthlyLimit) : 0;
+                        Console.WriteLine($"  Month: {m.CurrentMonthUsage} / {m.MonthlyLimit} prompts ({monthPct:F1}%)");
+                        Console.WriteLine($"  Daily budget: {m.DailyBudget} | Used today: {m.UsedToday}");
+                        Console.WriteLine($"  Days remaining: {m.DaysRemaining}");
+                        break;
+
+                    case BillingModel.PayPerUse:
+                        Console.WriteLine($"  Spent: ${m.CurrentMonthSpend:F2} / ${m.BudgetLimit:F2} budget");
+                        break;
+                }
+
+                Console.WriteLine($"  Enabled: {(quota.Enabled ? "Yes" : "No")}");
+            }
+            break;
+
+        case "set":
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: quota set <provider>");
+                return;
+            }
+            ConfigureProviderQuota(args[2], quotaManager);
+            break;
+
+        case "reset":
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: quota reset <provider>");
+                return;
+            }
+            var providerId = args[2].ToLower();
+            var pq = quotaManager.GetProviderQuota(providerId);
+            if (pq == null)
+            {
+                Console.WriteLine($"Provider not found: {providerId}");
+                return;
+            }
+
+            if (pq.BillingModel == BillingModel.TimeBasedReset)
+            {
+                quotaManager.ResetWindow(providerId);
+                Console.WriteLine($"Reset window for {pq.DisplayName}");
+            }
+            else if (pq.BillingModel == BillingModel.MonthlyLimit)
+            {
+                quotaManager.ResetMonthlyUsage(providerId);
+                Console.WriteLine($"Reset monthly usage for {pq.DisplayName}");
+            }
+            break;
+
+        default:
+            Console.WriteLine("Quota Commands:");
+            Console.WriteLine("  quota                - List all provider quotas");
+            Console.WriteLine("  quota <provider>     - Show specific provider quota");
+            Console.WriteLine("  quota set <provider> - Configure quota settings");
+            Console.WriteLine("  quota reset <provider> - Reset quota counter");
+            break;
+    }
+}
+
+static void PrintProviderQuota(ProviderQuota quota, QuotaManager quotaManager)
+{
+    var metrics = quotaManager.GetMetrics(quota.ProviderId);
+
+    Console.WriteLine($"{quota.DisplayName}");
+    Console.WriteLine("─".PadRight(50, '─'));
+    Console.WriteLine($"Provider ID:    {quota.ProviderId}");
+    Console.WriteLine($"Billing Model:  {quota.BillingModel}");
+    Console.WriteLine($"Enabled:        {(quota.Enabled ? "Yes" : "No")}");
+
+    if (!string.IsNullOrEmpty(quota.Notes))
+        Console.WriteLine($"Notes:          {quota.Notes}");
+
+    Console.WriteLine();
+
+    switch (quota.BillingModel)
+    {
+        case BillingModel.TimeBasedReset:
+            var timeLeft = quotaManager.GetTimeUntilReset(quota.ProviderId);
+            Console.WriteLine("Time-Based Quota:");
+            Console.WriteLine($"  Reset interval: {quota.ResetIntervalHours} hours");
+            Console.WriteLine($"  Tokens per window: {quota.TokensPerWindow:N0}");
+            Console.WriteLine($"  Current usage: {metrics.CurrentWindowUsage:N0}");
+            Console.WriteLine($"  Remaining: {metrics.WindowLimit - metrics.CurrentWindowUsage:N0}");
+            Console.WriteLine($"  Window started: {quota.CurrentWindowStart:yyyy-MM-dd HH:mm}");
+            Console.WriteLine($"  Resets in: {timeLeft:hh\\:mm\\:ss}");
+            break;
+
+        case BillingModel.MonthlyLimit:
+            Console.WriteLine("Monthly Limit:");
+            Console.WriteLine($"  Monthly limit: {quota.MonthlyLimit} premium prompts");
+            Console.WriteLine($"  Used this month: {metrics.CurrentMonthUsage}");
+            Console.WriteLine($"  Remaining: {metrics.MonthlyLimit - metrics.CurrentMonthUsage}");
+            Console.WriteLine($"  Daily budget: {metrics.DailyBudget}");
+            Console.WriteLine($"  Used today: {metrics.UsedToday}");
+            Console.WriteLine($"  Pacing multiplier: {quota.PacingMultiplier:F1}x");
+            Console.WriteLine($"  Enforce pacing: {(quota.EnforcePacing ? "Yes" : "No")}");
+            break;
+
+        case BillingModel.PayPerUse:
+            Console.WriteLine("Pay Per Use:");
+            Console.WriteLine($"  Monthly budget: ${quota.MonthlyBudgetUsd:F2}");
+            Console.WriteLine($"  Spent this month: ${metrics.CurrentMonthSpend:F2}");
+            Console.WriteLine($"  Remaining: ${metrics.BudgetLimit - metrics.CurrentMonthSpend:F2}");
+            break;
+    }
+}
+
+static void ConfigureProviderQuota(string providerId, QuotaManager quotaManager)
+{
+    var quota = quotaManager.GetProviderQuota(providerId);
+    if (quota == null)
+    {
+        Console.WriteLine($"Provider not found: {providerId}");
+        Console.WriteLine("Available providers: anthropic, github, openai");
+        return;
+    }
+
+    Console.WriteLine($"Configuring {quota.DisplayName}...");
+    Console.WriteLine($"Current billing model: {quota.BillingModel}");
+    Console.WriteLine();
+
+    switch (quota.BillingModel)
+    {
+        case BillingModel.TimeBasedReset:
+            Console.Write($"Reset interval hours [{quota.ResetIntervalHours}]: ");
+            if (int.TryParse(Console.ReadLine(), out var hours) && hours > 0)
+                quota.ResetIntervalHours = hours;
+
+            Console.Write($"Tokens per window [{quota.TokensPerWindow}]: ");
+            if (int.TryParse(Console.ReadLine(), out var tokens) && tokens > 0)
+                quota.TokensPerWindow = tokens;
+            break;
+
+        case BillingModel.MonthlyLimit:
+            Console.Write($"Monthly limit [{quota.MonthlyLimit}]: ");
+            if (int.TryParse(Console.ReadLine(), out var limit) && limit > 0)
+                quota.MonthlyLimit = limit;
+
+            Console.Write($"Pacing multiplier [{quota.PacingMultiplier:F1}]: ");
+            if (decimal.TryParse(Console.ReadLine(), out var pacing) && pacing > 0)
+                quota.PacingMultiplier = pacing;
+
+            Console.Write($"Enforce pacing (y/n) [{(quota.EnforcePacing ? "y" : "n")}]: ");
+            var enforce = Console.ReadLine()?.ToLower();
+            if (enforce == "y") quota.EnforcePacing = true;
+            else if (enforce == "n") quota.EnforcePacing = false;
+            break;
+
+        case BillingModel.PayPerUse:
+            Console.Write($"Monthly budget USD [{quota.MonthlyBudgetUsd:F2}]: ");
+            if (decimal.TryParse(Console.ReadLine(), out var budget) && budget >= 0)
+                quota.MonthlyBudgetUsd = budget;
+            break;
+    }
+
+    Console.Write($"Enabled (y/n) [{(quota.Enabled ? "y" : "n")}]: ");
+    var enabled = Console.ReadLine()?.ToLower();
+    if (enabled == "y") quota.Enabled = true;
+    else if (enabled == "n") quota.Enabled = false;
+
+    quotaManager.UpdateProviderQuota(quota);
+    Console.WriteLine("Quota configuration saved.");
+}
+
+static void PrintCostSummary(string period, Dictionary<string, ModelUsageSummary> summary, ModelRegistry registry)
+{
+    Console.WriteLine($"Usage Summary - {period}:");
+    Console.WriteLine("─".PadRight(80, '─'));
+
+    if (summary.Count == 0)
+    {
+        Console.WriteLine("  No usage recorded.");
+        return;
+    }
+
+    Console.WriteLine($"{"Model",-35} {"Requests",-10} {"Input Tokens",-15} {"Output Tokens",-15} {"Cost"}");
+    Console.WriteLine("─".PadRight(80, '─'));
+
+    decimal totalCost = 0;
+    int totalRequests = 0;
+
+    foreach (var (modelId, usage) in summary.OrderByDescending(s => s.Value.TotalCost))
+    {
+        var model = registry.GetModel(modelId);
+        var displayName = model?.DisplayName ?? modelId;
+        if (displayName.Length > 33) displayName = displayName[..30] + "...";
+
+        Console.WriteLine($"{displayName,-35} {usage.RequestCount,-10} {usage.TotalInputTokens,-15:N0} {usage.TotalOutputTokens,-15:N0} ${usage.TotalCost:F4}");
+
+        totalCost += usage.TotalCost;
+        totalRequests += usage.RequestCount;
+    }
+
+    Console.WriteLine("─".PadRight(80, '─'));
+    Console.WriteLine($"{"TOTAL",-35} {totalRequests,-10} {"",-15} {"",-15} ${totalCost:F4}");
+    Console.WriteLine();
+}
+
+// ============================================================================
+// Status Command - Consolidated view
+// ============================================================================
+static async Task HandleStatusCommandAsync()
+{
+    var status = new SystemStatus();
+    await status.PrintCompactStatusAsync();
+}
+
+// ============================================================================
+// Setup Wizard
+// ============================================================================
+static async Task HandleSetupCommandAsync()
+{
+    var wizard = new SetupWizard();
+    await wizard.RunAsync();
+}
+
+// ============================================================================
+// Health Check Commands
+// ============================================================================
+static async Task HandleHealthCommandAsync(string[] args)
+{
+    var healthService = new HealthCheckService();
+    var subCommand = args.Length > 1 ? args[1].ToLower() : "all";
+
+    switch (subCommand)
+    {
+        case "all":
+        case "full":
+            Console.WriteLine("Running full health check...");
+            Console.WriteLine();
+            var report = await healthService.CheckAllAsync();
+            report.PrintConsole();
+            break;
+
+        case "claude":
+        case "anthropic":
+            Console.WriteLine("Checking Claude CLI...");
+            var claudeHealth = await healthService.CheckClaudeAsync();
+            PrintSingleProviderHealth(claudeHealth);
+            break;
+
+        case "github":
+        case "gh":
+        case "copilot":
+            Console.WriteLine("Checking GitHub CLI...");
+            var ghHealth = await healthService.CheckGitHubAsync();
+            PrintSingleProviderHealth(ghHealth);
+            break;
+
+        case "openai":
+        case "gpt":
+            Console.WriteLine("Checking OpenAI API...");
+            var openaiHealth = await healthService.CheckOpenAIAsync();
+            PrintSingleProviderHealth(openaiHealth);
+            break;
+
+        default:
+            Console.WriteLine("Health Check Commands:");
+            Console.WriteLine("  health              - Full health check (all providers)");
+            Console.WriteLine("  health claude       - Check Claude CLI status");
+            Console.WriteLine("  health github       - Check GitHub CLI/Copilot status");
+            Console.WriteLine("  health openai       - Check OpenAI API status");
+            Console.WriteLine();
+            Console.WriteLine("This checks:");
+            Console.WriteLine("  - CLI installation and version");
+            Console.WriteLine("  - Authentication status");
+            Console.WriteLine("  - API connectivity");
+            Console.WriteLine("  - Subscription type (where detectable)");
+            break;
+    }
+}
+
+static void PrintSingleProviderHealth(ProviderHealth health)
+{
+    Console.WriteLine();
+    Console.WriteLine($"{health.DisplayName}");
+    Console.WriteLine("─".PadRight(50, '─'));
+
+    var statusColor = health.Status switch
+    {
+        HealthStatus.Healthy => ConsoleColor.Green,
+        HealthStatus.PartiallyHealthy => ConsoleColor.Yellow,
+        _ => ConsoleColor.Red
+    };
+
+    Console.Write("Status: ");
+    var prevColor = Console.ForegroundColor;
+    Console.ForegroundColor = statusColor;
+    Console.WriteLine(health.Status);
+    Console.ForegroundColor = prevColor;
+
+    if (!string.IsNullOrEmpty(health.Message))
+        Console.WriteLine($"Message: {health.Message}");
+
+    if (!string.IsNullOrEmpty(health.Version))
+        Console.WriteLine($"Version: {health.Version}");
+
+    if (!string.IsNullOrEmpty(health.ExecutablePath))
+        Console.WriteLine($"Path: {health.ExecutablePath}");
+
+    if (!string.IsNullOrEmpty(health.SubscriptionType))
+        Console.WriteLine($"Subscription: {health.SubscriptionType}");
+
+    Console.WriteLine($"Authenticated: {(health.IsAuthenticated ? "Yes" : "No")}");
+
+    if (health.Details.Count > 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Details:");
+        foreach (var (key, value) in health.Details)
+        {
+            Console.WriteLine($"  {key}: {value}");
+        }
+    }
+}
+
+// ============================================================================
+// Notification Commands
+// ============================================================================
+static async Task HandleNotifyCommandAsync(string[] args)
+{
+    var manager = new NotificationManager();
+    var subCommand = args.Length > 1 ? args[1].ToLower() : "status";
+
+    switch (subCommand)
+    {
+        case "status":
+            Console.WriteLine("Notification Channels:");
+            Console.WriteLine("─".PadRight(60, '─'));
+
+            foreach (var channel in manager.Channels)
+            {
+                var configured = channel.IsConfigured ? "Configured" : "Not configured";
+                var enabled = manager.EnabledChannels.Contains(channel.ChannelId) ? "Enabled" : "Disabled";
+                var status = channel.IsConfigured && manager.EnabledChannels.Contains(channel.ChannelId)
+                    ? ConsoleColor.Green : ConsoleColor.Yellow;
+
+                Console.Write($"  {channel.DisplayName,-25} ");
+                var prevColor = Console.ForegroundColor;
+                Console.ForegroundColor = status;
+                Console.Write($"{configured,-15}");
+                Console.ForegroundColor = prevColor;
+                Console.WriteLine($" {enabled}");
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("Setup Instructions:");
+            Console.WriteLine("  Email:   Set SMTP_SERVER, SMTP_FROM, SMTP_PASSWORD, NOTIFY_EMAIL");
+            Console.WriteLine("  Discord: Set DISCORD_WEBHOOK_URL");
+            Console.WriteLine("  ntfy:    Set NTFY_TOPIC (free, no account needed)");
+            break;
+
+        case "test":
+            Console.WriteLine("Testing notification channels...");
+            Console.WriteLine();
+
+            var testResults = await manager.TestAllChannelsAsync();
+
+            foreach (var (channelId, success) in testResults)
+            {
+                var channel = manager.Channels.FirstOrDefault(c => c.ChannelId == channelId);
+                var status = success ? "OK" : "FAILED";
+                var color = success ? ConsoleColor.Green : ConsoleColor.Red;
+
+                Console.Write($"  {channel?.DisplayName ?? channelId,-25} ");
+                var prevColor = Console.ForegroundColor;
+                Console.ForegroundColor = color;
+                Console.WriteLine(status);
+                Console.ForegroundColor = prevColor;
+            }
+
+            if (testResults.Count == 0)
+            {
+                Console.WriteLine("  No channels configured. Set environment variables first.");
+            }
+            break;
+
+        case "enable":
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: notify enable <channel>");
+                Console.WriteLine("Channels: email, discord, ntfy");
+                return;
+            }
+            var enableId = args[2].ToLower();
+            manager.EnableChannel(enableId);
+            Console.WriteLine($"Enabled notification channel: {enableId}");
+            break;
+
+        case "disable":
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: notify disable <channel>");
+                Console.WriteLine("Channels: email, discord, ntfy");
+                return;
+            }
+            var disableId = args[2].ToLower();
+            manager.DisableChannel(disableId);
+            Console.WriteLine($"Disabled notification channel: {disableId}");
+            break;
+
+        case "config":
+            Console.WriteLine("Notification Configuration:");
+            Console.WriteLine("─".PadRight(60, '─'));
+            Console.WriteLine();
+
+            Console.WriteLine("Enabled Channels:");
+            if (manager.EnabledChannels.Count == 0)
+                Console.WriteLine("  (none)");
+            else
+                foreach (var ch in manager.EnabledChannels)
+                    Console.WriteLine($"  - {ch}");
+
+            Console.WriteLine();
+            Console.WriteLine("Channel Configuration:");
+
+            // Email
+            var smtpServer = Environment.GetEnvironmentVariable("SMTP_SERVER");
+            var smtpFrom = Environment.GetEnvironmentVariable("SMTP_FROM");
+            var notifyEmail = Environment.GetEnvironmentVariable("NOTIFY_EMAIL");
+            Console.WriteLine($"  Email:");
+            Console.WriteLine($"    SMTP_SERVER:  {(string.IsNullOrEmpty(smtpServer) ? "(not set)" : smtpServer)}");
+            Console.WriteLine($"    SMTP_FROM:    {(string.IsNullOrEmpty(smtpFrom) ? "(not set)" : smtpFrom)}");
+            Console.WriteLine($"    NOTIFY_EMAIL: {(string.IsNullOrEmpty(notifyEmail) ? "(not set)" : notifyEmail)}");
+
+            // Discord
+            var discordUrl = Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL");
+            Console.WriteLine($"  Discord:");
+            Console.WriteLine($"    DISCORD_WEBHOOK_URL: {(string.IsNullOrEmpty(discordUrl) ? "(not set)" : "(set)")}");
+
+            // ntfy
+            var ntfyTopic = Environment.GetEnvironmentVariable("NTFY_TOPIC");
+            var ntfyServer = Environment.GetEnvironmentVariable("NTFY_SERVER");
+            Console.WriteLine($"  ntfy:");
+            Console.WriteLine($"    NTFY_TOPIC:  {(string.IsNullOrEmpty(ntfyTopic) ? "(not set)" : ntfyTopic)}");
+            Console.WriteLine($"    NTFY_SERVER: {(string.IsNullOrEmpty(ntfyServer) ? "https://ntfy.sh (default)" : ntfyServer)}");
+            break;
+
+        case "send":
+            // Manual send for testing
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: notify send \"message\" [title]");
+                return;
+            }
+            var message = args[2];
+            var title = args.Length > 3 ? args[3] : "Test Notification";
+
+            var result = await manager.SendAsync(new Notification
+            {
+                Title = title,
+                Message = message,
+                Level = NotificationLevel.Info,
+                Type = NotificationType.General
+            });
+
+            if (result.Success)
+                Console.WriteLine("Notification sent successfully!");
+            else
+                Console.WriteLine("Failed to send notification. Check channel configuration.");
+            break;
+
+        default:
+            Console.WriteLine("Notification Commands:");
+            Console.WriteLine("  notify                    - Show channel status");
+            Console.WriteLine("  notify test               - Test all configured channels");
+            Console.WriteLine("  notify enable <channel>   - Enable a channel (email, discord, ntfy)");
+            Console.WriteLine("  notify disable <channel>  - Disable a channel");
+            Console.WriteLine("  notify config             - Show full configuration");
+            Console.WriteLine("  notify send \"msg\" [title] - Send a manual notification");
+            Console.WriteLine();
+            Console.WriteLine("Quick Setup (ntfy - free phone notifications):");
+            Console.WriteLine("  1. Install ntfy app on your phone");
+            Console.WriteLine("  2. Subscribe to a topic (e.g., 'my-automation')");
+            Console.WriteLine("  3. Set environment variable: NTFY_TOPIC=my-automation");
+            Console.WriteLine("  4. Run: dotnet run -- notify enable ntfy");
+            Console.WriteLine("  5. Test: dotnet run -- notify test");
+            break;
+    }
+}
 
 // ============================================================================
 // Config Commands - JSON configuration management

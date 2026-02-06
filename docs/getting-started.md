@@ -81,15 +81,38 @@ sudo mv hld /usr/local/bin/
 
 ## Step 3: Install Claude Code
 
+Claude Code is now distributed as a native binary (no Node.js required).
+
+### macOS / Linux
 ```bash
-npm install -g @anthropic/claude-code
-
-# Verify installation
-claude --version
-
-# Authenticate (follow prompts)
-claude auth
+curl -fsSL https://claude.ai/install.sh | bash
 ```
+
+### Windows (PowerShell)
+```powershell
+irm https://claude.ai/install.ps1 | iex
+```
+
+### Alternative: Package Managers
+```bash
+# macOS (Homebrew)
+brew install claude-code
+
+# Windows (WinGet) - Note: doesn't auto-update
+winget install Anthropic.ClaudeCode
+```
+
+### Verify and Authenticate
+```bash
+# Check installation
+claude --version
+claude doctor
+
+# Authenticate (opens browser for OAuth)
+claude
+```
+
+The installer places Claude Code in `~/.local/bin` (Linux/macOS) or `%LOCALAPPDATA%\Programs\claude-code` (Windows) and adds it to your PATH automatically.
 
 ---
 
@@ -340,7 +363,11 @@ Error: Cannot connect to daemon
 ```
 Error: Claude binary not available
 ```
-**Solution**: Install Claude Code with `npm install -g @anthropic/claude-code` and authenticate with `claude auth`
+**Solution**: Install Claude Code:
+- **Linux/macOS**: `curl -fsSL https://claude.ai/install.sh | bash`
+- **Windows**: `irm https://claude.ai/install.ps1 | iex`
+
+Then run `claude` to authenticate via OAuth.
 
 ### Session stuck in "starting"
 ```
