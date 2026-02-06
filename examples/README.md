@@ -105,7 +105,82 @@ dotnet run -- list
 
 ---
 
-## Example 4: Parallel Analysis
+## Example 4: Build a Todo App with GitHub Copilot Only
+
+These examples use **only** the GitHub Copilot Chat Completions API (no Claude, no OpenAI) to generate, build, and self-heal a Todo CLI app.
+
+### Option A: PowerShell Script (Standalone)
+
+Calls the Copilot API directly — no .NET project dependency needed:
+
+```powershell
+# Set your GitHub token (Pro subscription required for Copilot API)
+$env:GITHUB_TOKEN = "ghp_your-token"
+# Or use: $env:GITHUB_TOKEN = (gh auth token)
+
+# Run the script
+.\examples\build-todo-app-copilot.ps1
+
+# Customize
+.\examples\build-todo-app-copilot.ps1 -OutputDir ".\my-todo" -MaxRetries 5 -Model "gpt-4o"
+```
+
+What it does:
+1. Checks prerequisites (`GITHUB_TOKEN`, .NET SDK, API connectivity)
+2. Calls Copilot to design the app architecture
+3. Generates `Program.cs`, `TodoItem.cs`, and `TodoCli.csproj` via API
+4. Builds the project with **self-healing** — build errors are fed back to Copilot
+5. Reports prompt count, token usage, and duration
+
+### Option B: C# Programmatic (ICodeProvider Interface)
+
+Uses the `GitHubCopilotProvider` class through the same `ICodeProvider` interface as Claude and OpenAI:
+
+See [`CopilotTodoAppExample.cs.example`](CopilotTodoAppExample.cs.example) for the full implementation.
+
+Key integration points:
+```csharp
+// Create Copilot provider directly (no MultiProvider fallback)
+var copilot = new GitHubCopilotProvider(
+    registry, quotaManager,
+    new GitHubCopilotOptions { DefaultModel = "gpt-4o" },
+    logger);
+
+// Send a prompt through the standard interface
+var result = await copilot.RunAsync(new ProviderRequest
+{
+    Prompt = "Generate a C# Program.cs for a Todo CLI...",
+    SystemPrompt = "You are an expert C# developer...",
+    Model = "gpt-4o",
+    MaxTokens = 4096,
+    AutoApprove = true
+});
+
+// Self-healing: feed build errors back to the same provider
+if (buildFailed)
+{
+    var fixResult = await copilot.RunAsync(new ProviderRequest
+    {
+        Prompt = $"Fix these build errors:\n{buildOutput}\n\nCode:\n{currentCode}",
+        SystemPrompt = codingSystemPrompt
+    });
+}
+```
+
+### Comparing Providers
+
+| Feature | Claude (CLI) | Copilot (API) | OpenAI (API) |
+|---------|-------------|---------------|-------------|
+| Auth | `claude` CLI login | `GITHUB_TOKEN` env var | `OPENAI_API_KEY` env var |
+| Coding | Full (tools + write) | Full (chat completions) | Full (chat completions) |
+| Self-healing | ✅ via CLI re-prompt | ✅ via API re-prompt | ✅ via API re-prompt |
+| Models | haiku, sonnet, opus | gpt-4o, gpt-4o-mini, o3-mini | gpt-4o |
+| Free tier | Limited | 2000 completions/mo | Pay-per-use |
+| Pro tier | Subscription | 1000 premium prompts/mo | Pay-per-use |
+
+---
+
+## Example 5: Parallel Analysis
 
 Run multiple analysis tasks simultaneously for faster results:
 
@@ -120,7 +195,7 @@ This runs 3 tasks concurrently:
 
 ---
 
-## Example 5: Scheduled Automation
+## Example 6: Scheduled Automation
 
 Run recurring tasks on a schedule:
 
@@ -135,7 +210,7 @@ Default scheduled tasks:
 
 ---
 
-## Example 6: Streaming Output
+## Example 7: Streaming Output
 
 Watch Claude's response in real-time:
 

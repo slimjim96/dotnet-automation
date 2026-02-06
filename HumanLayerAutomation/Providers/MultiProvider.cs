@@ -260,25 +260,40 @@ public class MultiProvider : ICodeProvider
 
         var error = result.Error?.ToLower() ?? "";
 
-        // Fall back on transient errors
+        // Fall back on transient/network errors
         if (error.Contains("timeout") ||
             error.Contains("rate limit") ||
             error.Contains("service unavailable") ||
             error.Contains("503") ||
-            error.Contains("429"))
+            error.Contains("429") ||
+            error.Contains("502") ||
+            error.Contains("504") ||
+            error.Contains("connection") ||
+            error.Contains("network"))
         {
             return true;
         }
 
-        // Don't fall back on authentication errors - need to fix config
+        // Don't fall back on authentication errors — need to fix config
         if (error.Contains("unauthorized") ||
             error.Contains("authentication") ||
-            error.Contains("api key"))
+            error.Contains("api key") ||
+            error.Contains("403") ||
+            error.Contains("invalid token"))
         {
             return false;
         }
 
-        // Default: fall back
+        // Don't fall back on build/code errors — these should be fed back
+        // to the SAME provider for self-healing, not retried on a different one
+        if (error.Contains("build failed") ||
+            error.Contains("compile error") ||
+            error.Contains("syntax error"))
+        {
+            return false;
+        }
+
+        // Default: fall back for autonomous operation
         return _options.FallbackOnAnyError;
     }
 }
@@ -300,9 +315,12 @@ public class MultiProviderOptions
     /// <summary>Maximum time to wait for quota reset.</summary>
     public TimeSpan MaxWaitTime { get; set; } = TimeSpan.FromHours(5);
 
-    /// <summary>Ignore pacing recommendations for monthly-limited providers.</summary>
-    public bool IgnorePacing { get; set; } = false;
+    /// <summary>
+    /// Ignore pacing recommendations for monthly-limited providers.
+    /// Default true for autonomous operation — let builds run freely.
+    /// </summary>
+    public bool IgnorePacing { get; set; } = true;
 
     /// <summary>Maximum percentage of monthly quota a single task can use.</summary>
-    public int MaxSingleTaskPercentage { get; set; } = 10;
+    public int MaxSingleTaskPercentage { get; set; } = 25;
 }

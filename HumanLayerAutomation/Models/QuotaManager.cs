@@ -380,16 +380,17 @@ public class QuotaManager
             },
 
             // GitHub Copilot Pro - Monthly premium prompts
+            // GitHub Pro: 1000 premium prompts/month (as of 2025)
             new ProviderQuota
             {
                 ProviderId = "github",
                 DisplayName = "GitHub Copilot Pro",
                 BillingModel = BillingModel.MonthlyLimit,
-                MonthlyLimit = 300, // Premium prompts per month (adjust based on plan)
-                PacingMultiplier = 1.5m, // Allow 50% burst above daily average
-                EnforcePacing = true,
+                MonthlyLimit = 1000, // GitHub Pro: 1000 premium prompts/month
+                PacingMultiplier = 2.0m, // Allow 2x burst above daily average for autonomous builds
+                EnforcePacing = false, // Disabled for autonomous operation — let builds run freely
                 Enabled = true,
-                Notes = "Monthly premium prompt limit. Pacing prevents single tasks from consuming too much."
+                Notes = "GitHub Pro: 1000 premium prompts/month via Copilot Chat API. Pacing disabled for autonomous builds."
             },
 
             // OpenAI - Pay per use

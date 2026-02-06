@@ -111,7 +111,7 @@ public class HealthCheckService
         return health;
     }
 
-    /// <summary>Check GitHub CLI and Copilot status.</summary>
+    /// <summary>Check GitHub CLI and Copilot status (API + CLI).</summary>
     public async Task<ProviderHealth> CheckGitHubAsync(CancellationToken ct = default)
     {
         var health = new ProviderHealth
@@ -123,19 +123,73 @@ public class HealthCheckService
 
         try
         {
-            // Check if gh CLI exists
+            // 1. Check for GitHub token (needed for Copilot Chat API)
+            var githubToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN")
+                ?? Environment.GetEnvironmentVariable("GH_TOKEN");
+
+            if (!string.IsNullOrEmpty(githubToken))
+            {
+                health.Details["api_token"] = "configured";
+                health.Details["api_token_prefix"] = githubToken.Length > 8
+                    ? githubToken[..8] + "..." : "***";
+
+                // Test GitHub Models API connectivity
+                try
+                {
+                    var apiClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                    var request = new HttpRequestMessage(HttpMethod.Get, "https://models.github.ai/catalog/models");
+                    request.Headers.Add("Authorization", $"Bearer {githubToken}");
+                    request.Headers.Add("Accept", "application/vnd.github+json");
+                    request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+                    request.Headers.Add("User-Agent", "dotnet-automation/1.0");
+
+                    var apiResponse = await apiClient.SendAsync(request, ct);
+                    if (apiResponse.IsSuccessStatusCode)
+                    {
+                        health.Details["copilot_api"] = "connected";
+                        health.IsAuthenticated = true;
+                    }
+                    else
+                    {
+                        health.Details["copilot_api"] = $"HTTP {(int)apiResponse.StatusCode}";
+                    }
+                    apiClient.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    health.Details["copilot_api"] = $"error: {ex.Message}";
+                }
+            }
+            else
+            {
+                health.Details["api_token"] = "not set (set GITHUB_TOKEN for full API access)";
+            }
+
+            // 2. Check if gh CLI exists
             var ghPath = FindExecutable("gh");
             if (ghPath == null)
             {
-                health.Status = HealthStatus.NotInstalled;
-                health.Message = "GitHub CLI not found. Install from: https://cli.github.com";
+                if (health.IsAuthenticated)
+                {
+                    // API works but no CLI — that's fine, API is preferred
+                    health.Status = HealthStatus.Healthy;
+                    health.Message = "Copilot Chat API is available (gh CLI not found but not required)";
+                    health.SubscriptionType = "GitHub Pro (API)";
+                }
+                else
+                {
+                    health.Status = HealthStatus.NotInstalled;
+                    health.Message = "GitHub CLI not found and GITHUB_TOKEN not set. " +
+                        "Install gh from https://cli.github.com or set GITHUB_TOKEN";
+                }
+                health.IsHealthy = health.IsAuthenticated;
                 return health;
             }
 
             health.ExecutablePath = ghPath;
             health.Details["cli_path"] = ghPath;
 
-            // Get version
+            // 3. Get gh CLI version
             var versionResult = await RunCommandAsync(ghPath, "--version", ct);
             if (versionResult.Success)
             {
@@ -144,14 +198,13 @@ public class HealthCheckService
                 health.Details["version"] = health.Version;
             }
 
-            // Check authentication status
+            // 4. Check gh auth status
             var authResult = await RunCommandAsync(ghPath, "auth status", ct);
             if (authResult.Success || authResult.Output.Contains("Logged in"))
             {
-                health.IsAuthenticated = true;
-                health.Details["auth_status"] = "authenticated";
+                if (!health.IsAuthenticated) health.IsAuthenticated = true;
+                health.Details["gh_auth"] = "authenticated";
 
-                // Parse auth output for account info
                 var authOutput = authResult.Output + authResult.Error;
                 if (authOutput.Contains("Logged in to github.com"))
                 {
@@ -163,28 +216,36 @@ public class HealthCheckService
                     }
                 }
             }
-            else
+            else if (!health.IsAuthenticated)
             {
                 health.Status = HealthStatus.AuthenticationFailed;
-                health.Message = "GitHub CLI not authenticated. Run: gh auth login";
+                health.Message = "Not authenticated. Run: gh auth login, or set GITHUB_TOKEN";
                 return health;
             }
 
-            // Check if Copilot extension is available
+            // 5. Check copilot CLI extension (optional — API is preferred)
             var copilotResult = await RunCommandAsync(ghPath, "copilot --version", ct);
             if (copilotResult.Success)
             {
-                health.Details["copilot_version"] = copilotResult.Output.Trim();
-                health.Status = HealthStatus.Healthy;
-                health.Message = "GitHub CLI with Copilot extension is ready";
-                health.SubscriptionType = "GitHub Copilot (requires active subscription)";
+                health.Details["copilot_cli"] = copilotResult.Output.Trim();
             }
             else
             {
-                // Copilot extension not installed
+                health.Details["copilot_cli"] = "not installed (optional — API is preferred)";
+            }
+
+            // Set final status
+            if (health.IsAuthenticated)
+            {
+                health.Status = HealthStatus.Healthy;
+                health.SubscriptionType = !string.IsNullOrEmpty(githubToken)
+                    ? "GitHub Pro (API + CLI)" : "GitHub Pro (CLI only)";
+                health.Message = "GitHub Copilot is ready for autonomous coding";
+            }
+            else
+            {
                 health.Status = HealthStatus.PartiallyHealthy;
-                health.Message = "GitHub CLI works but Copilot extension not found. Install with: gh extension install github/gh-copilot";
-                health.Details["copilot_status"] = "extension not installed";
+                health.Message = "GitHub CLI works but Copilot access not verified";
             }
         }
         catch (Exception ex)

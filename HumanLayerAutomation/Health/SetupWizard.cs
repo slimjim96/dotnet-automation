@@ -101,7 +101,7 @@ public class SetupWizard
     private async Task CheckAndSetupGitHubAsync(PlatformInfo platform)
     {
         Console.WriteLine("─".PadRight(60, '─'));
-        Console.WriteLine("2. GitHub CLI + Copilot");
+        Console.WriteLine("2. GitHub Copilot (API + CLI)");
         Console.WriteLine();
 
         var health = await _healthService.CheckGitHubAsync();
@@ -109,15 +109,55 @@ public class SetupWizard
         if (health.Status == HealthStatus.Healthy)
         {
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"   [OK] GitHub CLI with Copilot is ready: {health.Version}");
+            Console.WriteLine($"   [OK] GitHub Copilot is ready: {health.Version}");
+            if (health.Details.TryGetValue("copilot_api", out var apiStatus))
+                Console.WriteLine($"   API: {apiStatus}");
             Console.ResetColor();
             return;
+        }
+
+        // Always recommend the API token first (it's the primary path for coding)
+        var githubToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN")
+            ?? Environment.GetEnvironmentVariable("GH_TOKEN");
+
+        if (string.IsNullOrEmpty(githubToken))
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("   GITHUB_TOKEN not set (needed for Copilot Chat API).");
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.WriteLine("   RECOMMENDED: Set a GitHub token for full autonomous coding:");
+            Console.WriteLine();
+
+            switch (platform.Type)
+            {
+                case "windows":
+                    Console.WriteLine("     PowerShell (session):");
+                    Console.WriteLine("       $env:GITHUB_TOKEN = \"ghp_your-token-here\"");
+                    Console.WriteLine();
+                    Console.WriteLine("     PowerShell (permanent):");
+                    Console.WriteLine("       [Environment]::SetEnvironmentVariable(\"GITHUB_TOKEN\", \"ghp_your-token\", \"User\")");
+                    break;
+
+                case "linux":
+                case "macos":
+                    Console.WriteLine("     bash/zsh:");
+                    Console.WriteLine("       export GITHUB_TOKEN=\"ghp_your-token-here\"");
+                    Console.WriteLine("     Add to ~/.bashrc or ~/.zshrc for permanent setup");
+                    break;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("   Get a token: https://github.com/settings/tokens?type=beta");
+            Console.WriteLine("   Required scope: models:read (fine-grained PAT)");
+            Console.WriteLine("   Or use: gh auth token (from an authenticated gh CLI)");
+            Console.WriteLine();
         }
 
         if (health.Status == HealthStatus.NotInstalled)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("   GitHub CLI is not installed.");
+            Console.WriteLine("   GitHub CLI is not installed (optional if GITHUB_TOKEN is set).");
             Console.ResetColor();
             Console.WriteLine();
             Console.WriteLine("   Installation:");
@@ -155,21 +195,8 @@ public class SetupWizard
         else if (health.Status == HealthStatus.AuthenticationFailed)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("   GitHub CLI installed but not authenticated.");
+            Console.WriteLine("   Not authenticated. Set GITHUB_TOKEN, or run: gh auth login");
             Console.ResetColor();
-            Console.WriteLine();
-            Console.WriteLine("   Run: gh auth login");
-        }
-        else if (health.Status == HealthStatus.PartiallyHealthy)
-        {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("   GitHub CLI works but Copilot extension not installed.");
-            Console.ResetColor();
-            Console.WriteLine();
-            Console.WriteLine("   Install Copilot extension:");
-            Console.WriteLine("     gh extension install github/gh-copilot");
-            Console.WriteLine();
-            Console.WriteLine("   Note: Requires active GitHub Copilot subscription");
         }
 
         Console.WriteLine();

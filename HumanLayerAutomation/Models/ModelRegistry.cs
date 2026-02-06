@@ -247,37 +247,68 @@ public class ModelRegistry
                 CodingPriority = 70,
                 Notes = "Fast and cheap, good for simple tasks"
             },
-            // GitHub Copilot
+            // GitHub Copilot (via GitHub Models API — requires Copilot subscription)
+            // Uses publisher/model_name format. See: https://models.github.ai/catalog/models
             new ModelInfo
             {
-                Id = "github-copilot",
+                Id = "openai/gpt-4o",
                 Provider = "github",
-                DisplayName = "GitHub Copilot",
-                Aliases = ["copilot", "gh-copilot"],
-                CostPerMillionInput = 0m, // Subscription-based
+                DisplayName = "GitHub Models (GPT-4o)",
+                Aliases = ["copilot", "gh-copilot", "github-copilot", "gpt-4o"],
+                CostPerMillionInput = 0m, // Subscription-based — no per-token cost
                 CostPerMillionOutput = 0m,
-                ContextWindow = 8000,
-                MaxOutput = 4000,
-                Capabilities = ["coding", "explain", "suggest"],
-                CodingPriority = 60,
-                Notes = "Subscription-based, good fallback option",
+                ContextWindow = 128000,
+                MaxOutput = 16384,
+                Capabilities = ["coding", "analysis", "reasoning", "explain"],
+                CodingPriority = 80,
+                Notes = "GitHub Pro: 1000 premium prompts/month. Full coding via Models API.",
                 RequiresSubscription = true
             },
-            // OpenAI models (for reference/future)
             new ModelInfo
             {
-                Id = "gpt-4o",
+                Id = "openai/gpt-4o-mini",
+                Provider = "github",
+                DisplayName = "GitHub Models (GPT-4o-mini)",
+                Aliases = ["copilot-mini", "gh-copilot-mini", "gpt-4o-mini"],
+                CostPerMillionInput = 0m,
+                CostPerMillionOutput = 0m,
+                ContextWindow = 128000,
+                MaxOutput = 16384,
+                Capabilities = ["coding", "analysis", "fast"],
+                CodingPriority = 65,
+                Notes = "Fast, low-quota-cost option for simpler coding tasks.",
+                RequiresSubscription = true
+            },
+            new ModelInfo
+            {
+                Id = "openai/o3-mini",
+                Provider = "github",
+                DisplayName = "GitHub Models (o3-mini)",
+                Aliases = ["copilot-o3", "gh-o3-mini", "o3-mini"],
+                CostPerMillionInput = 0m,
+                CostPerMillionOutput = 0m,
+                ContextWindow = 128000,
+                MaxOutput = 65536,
+                Capabilities = ["coding", "reasoning", "analysis"],
+                CodingPriority = 85,
+                Notes = "Reasoning model via GitHub Models. Great for complex logic.",
+                RequiresSubscription = true
+            },
+            // OpenAI models (direct API — pay-per-use)
+            new ModelInfo
+            {
+                Id = "openai-gpt-4o",
                 Provider = "openai",
-                DisplayName = "GPT-4o",
-                Aliases = ["gpt4o", "gpt-4-omni"],
+                DisplayName = "GPT-4o (OpenAI API)",
+                Aliases = ["gpt4o", "gpt-4-omni", "openai-gpt4o"],
                 CostPerMillionInput = 2.50m,
                 CostPerMillionOutput = 10.00m,
                 ContextWindow = 128000,
                 MaxOutput = 16384,
                 Capabilities = ["coding", "analysis", "vision"],
-                CodingPriority = 80,
-                Enabled = false, // Disabled by default, enable if API key available
-                Notes = "OpenAI's latest multimodal model"
+                CodingPriority = 75,
+                Enabled = false, // Disabled by default — enable if OPENAI_API_KEY is set
+                Notes = "OpenAI direct API. Pay-per-token. Enable as last-resort fallback."
             }
         ]);
 

@@ -1,0 +1,531 @@
+using Microsoft.Extensions.Logging;
+using HumanLayerAutomation.Models;
+using HumanLayerAutomation.Providers;
+
+namespace Examples;
+
+/// <summary>
+/// Example: Build a simple Todo CLI app using ONLY the GitHub Copilot provider.
+///
+/// This demonstrates the new API-first GitHubCopilotProvider with:
+///   - Direct calls to the Copilot Chat Completions API
+///   - Multi-step code generation (design → code → build)
+///   - Self-healing: build errors are fed back to Copilot for auto-fix
+///   - No fallback to other providers — Copilot handles everything
+///
+/// Prerequisites:
+///   - GITHUB_TOKEN env var (GitHub Pro with Copilot access)
+///   - .NET SDK
+///
+/// Integration:
+///   To wire this into Program.cs, add a command like:
+///     case "build-copilot":
+///         await new CopilotTodoAppExample(loggerFactory).RunAsync();
+///         break;
+///
+///   Or run the standalone script: .\examples\build-todo-app-copilot.ps1
+/// </summary>
+public class CopilotTodoAppExample
+{
+    private readonly GitHubCopilotProvider _copilot;
+    private readonly ILogger _logger;
+    private readonly string _outputDir;
+    private int _totalPrompts;
+    private decimal _totalCost;
+
+    public CopilotTodoAppExample(ILoggerFactory loggerFactory, string? outputDir = null)
+    {
+        var registry = new ModelRegistry();
+        var quotaManager = new QuotaManager();
+
+        _copilot = new GitHubCopilotProvider(
+            registry,
+            quotaManager,
+            new GitHubCopilotOptions
+            {
+                DefaultModel = "openai/gpt-4o",
+                DefaultMaxTokens = 4096,
+                Temperature = 0.1
+            },
+            loggerFactory.CreateLogger<GitHubCopilotProvider>());
+
+        _logger = loggerFactory.CreateLogger<CopilotTodoAppExample>();
+        _outputDir = outputDir ?? Path.Combine(".", "generated", "TodoCli-Copilot");
+    }
+
+    /// <summary>
+    /// Run the full build pipeline: design → generate → build → fix.
+    /// </summary>
+    public async Task<CopilotBuildResult> RunAsync(CancellationToken ct = default)
+    {
+        var result = new CopilotBuildResult { StartTime = DateTime.UtcNow };
+
+        Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
+        Console.WriteLine("║   Build Todo App — GitHub Copilot Only (API)                 ║");
+        Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
+        Console.WriteLine();
+
+        // Verify Copilot is available
+        Console.Write("Checking GitHub Copilot API... ");
+        if (!await _copilot.IsAvailableAsync(ct))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("NOT AVAILABLE");
+            Console.ResetColor();
+            Console.WriteLine("Set GITHUB_TOKEN env var with a GitHub Pro token.");
+            result.ErrorMessage = "GitHub Copilot API not available";
+            return result;
+        }
+
+        Console.ForegroundColor = _copilot.IsApiAvailable ? ConsoleColor.Green : ConsoleColor.Yellow;
+        Console.WriteLine(_copilot.IsApiAvailable ? "OK (API)" : "OK (CLI fallback only)");
+        Console.ResetColor();
+
+        if (!_copilot.IsApiAvailable)
+        {
+            Console.WriteLine("WARNING: Only CLI fallback available — cannot generate code files.");
+            Console.WriteLine("Set GITHUB_TOKEN for full coding capability.");
+            result.ErrorMessage = "API not available, CLI fallback cannot generate code";
+            return result;
+        }
+
+        Directory.CreateDirectory(_outputDir);
+        Console.WriteLine($"Output: {Path.GetFullPath(_outputDir)}");
+        Console.WriteLine();
+
+        // ── Step 1: Design ──────────────────────────────────────────────────
+        Console.WriteLine("STEP 1: Designing the application...");
+        Console.WriteLine("─".PadRight(50, '─'));
+
+        var designResult = await RunPromptAsync("Design", GetDesignPrompt(), maxTokens: 500, ct: ct);
+        if (!designResult.Success)
+        {
+            result.ErrorMessage = $"Design failed: {designResult.Error}";
+            return result;
+        }
+        result.DesignOutput = designResult.Output;
+        Console.WriteLine(designResult.Output);
+        Console.WriteLine($"  ✓ Design complete ({designResult.Duration.TotalSeconds:F1}s)");
+        Console.WriteLine();
+
+        // ── Step 2: Generate Program.cs ─────────────────────────────────────
+        Console.WriteLine("STEP 2: Generating Program.cs...");
+        Console.WriteLine("─".PadRight(50, '─'));
+
+        var programResult = await RunPromptAsync("Program.cs", GetProgramPrompt(), ct: ct);
+        if (!programResult.Success)
+        {
+            result.ErrorMessage = $"Program.cs generation failed: {programResult.Error}";
+            return result;
+        }
+        var programCode = ExtractCode(programResult.Output ?? "", "csharp");
+        await File.WriteAllTextAsync(Path.Combine(_outputDir, "Program.cs"), programCode, ct);
+        Console.WriteLine($"  ✓ Program.cs ({CountLines(programCode)} lines, {programResult.Duration.TotalSeconds:F1}s)");
+        Console.WriteLine();
+
+        // ── Step 3: Generate TodoItem.cs ────────────────────────────────────
+        Console.WriteLine("STEP 3: Generating TodoItem.cs...");
+        Console.WriteLine("─".PadRight(50, '─'));
+
+        var modelResult = await RunPromptAsync("TodoItem.cs", GetModelsPrompt(), ct: ct);
+        if (!modelResult.Success)
+        {
+            result.ErrorMessage = $"TodoItem.cs generation failed: {modelResult.Error}";
+            return result;
+        }
+        var modelsCode = ExtractCode(modelResult.Output ?? "", "csharp");
+        await File.WriteAllTextAsync(Path.Combine(_outputDir, "TodoItem.cs"), modelsCode, ct);
+        Console.WriteLine($"  ✓ TodoItem.cs ({CountLines(modelsCode)} lines, {modelResult.Duration.TotalSeconds:F1}s)");
+        Console.WriteLine();
+
+        // ── Step 4: Generate .csproj ────────────────────────────────────────
+        Console.WriteLine("STEP 4: Generating TodoCli.csproj...");
+        Console.WriteLine("─".PadRight(50, '─'));
+
+        var csprojResult = await RunPromptAsync("TodoCli.csproj", GetCsprojPrompt(), maxTokens: 500, ct: ct);
+        if (!csprojResult.Success)
+        {
+            result.ErrorMessage = $"csproj generation failed: {csprojResult.Error}";
+            return result;
+        }
+        var csprojCode = ExtractCode(csprojResult.Output ?? "", "xml");
+        await File.WriteAllTextAsync(Path.Combine(_outputDir, "TodoCli.csproj"), csprojCode, ct);
+        Console.WriteLine($"  ✓ TodoCli.csproj generated ({csprojResult.Duration.TotalSeconds:F1}s)");
+        Console.WriteLine();
+
+        // ── Step 5: Build with self-healing ─────────────────────────────────
+        Console.WriteLine("STEP 5: Building with self-healing...");
+        Console.WriteLine("─".PadRight(50, '─'));
+
+        var buildSuccess = await BuildWithSelfHealingAsync(maxRetries: 3, ct: ct);
+        result.BuildSucceeded = buildSuccess;
+
+        // ── Summary ─────────────────────────────────────────────────────────
+        result.EndTime = DateTime.UtcNow;
+        result.TotalPrompts = _totalPrompts;
+        result.TotalCost = _totalCost;
+
+        Console.WriteLine();
+        Console.WriteLine("══════════════════════════════════════════════════════════════");
+        if (buildSuccess)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("BUILD SUCCESSFUL!");
+            Console.ResetColor();
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("BUILD FAILED");
+            Console.ResetColor();
+            result.ErrorMessage = "Build failed after all retry attempts";
+        }
+        Console.WriteLine($"  Provider:  GitHub Models API (openai/gpt-4o)");
+        Console.WriteLine($"  Prompts:   {_totalPrompts}");
+        Console.WriteLine($"  Cost:      ${_totalCost:F4}");
+        Console.WriteLine($"  Duration:  {result.Duration.TotalSeconds:F1}s");
+        Console.WriteLine($"  Output:    {Path.GetFullPath(_outputDir)}");
+
+        if (buildSuccess)
+        {
+            Console.WriteLine();
+            Console.WriteLine("  Try it:");
+            Console.WriteLine($"    cd {_outputDir}");
+            Console.WriteLine("    dotnet run -- add \"Buy groceries\" --priority high");
+            Console.WriteLine("    dotnet run -- list");
+        }
+
+        return result;
+    }
+
+    // ========================================================================
+    // Core: Send a prompt to Copilot via the ICodeProvider interface
+    // ========================================================================
+
+    private async Task<ProviderResult> RunPromptAsync(
+        string stepName,
+        string prompt,
+        string? systemPrompt = null,
+        int? maxTokens = null,
+        CancellationToken ct = default)
+    {
+        var request = new ProviderRequest
+        {
+            Prompt = prompt,
+            SystemPrompt = systemPrompt ?? CodingSystemPrompt,
+            Model = "openai/gpt-4o",
+            MaxTokens = maxTokens ?? 4096,
+            AutoApprove = true
+        };
+
+        _logger.LogDebug("Sending prompt for {Step} to Copilot", stepName);
+        var result = await _copilot.RunAsync(request, ct);
+        _totalPrompts++;
+        _totalCost += result.Cost;
+
+        if (!result.Success)
+        {
+            _logger.LogWarning("Copilot returned error for {Step}: {Error}", stepName, result.Error);
+        }
+
+        return result;
+    }
+
+    // ========================================================================
+    // Self-healing build loop
+    // ========================================================================
+
+    private async Task<bool> BuildWithSelfHealingAsync(int maxRetries = 3, CancellationToken ct = default)
+    {
+        for (int attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            Console.WriteLine($"  Build attempt {attempt}/{maxRetries}...");
+
+            var (exitCode, output) = await RunDotnetBuildAsync(ct);
+
+            if (exitCode == 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("  ✓ Build succeeded!");
+                Console.ResetColor();
+                return true;
+            }
+
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"  ✗ Build failed (exit code {exitCode})");
+            Console.ResetColor();
+
+            // Extract error lines for display
+            var errorLines = output.Split('\n')
+                .Where(l => l.Contains("error CS") || l.Contains("error MSB"))
+                .ToList();
+            foreach (var line in errorLines.Take(10))
+            {
+                Console.WriteLine($"    {line.Trim()}");
+            }
+
+            if (attempt >= maxRetries) break;
+
+            // Feed errors back to Copilot for fixing
+            Console.WriteLine();
+            Console.WriteLine("  Sending errors to Copilot for auto-fix...");
+
+            var filesToFix = DetectErrorFiles(output);
+            foreach (var fileName in filesToFix)
+            {
+                var filePath = Path.Combine(_outputDir, fileName);
+                if (!File.Exists(filePath)) continue;
+
+                var currentCode = await File.ReadAllTextAsync(filePath, ct);
+
+                // Include the other file for cross-reference
+                var otherContext = await GetCrossReferenceContextAsync(fileName, ct);
+
+                var fixPrompt = $"""
+                    The following C# code has compilation errors. Fix ALL errors and return the COMPLETE corrected file.
+
+                    FILE: {fileName}
+
+                    BUILD ERRORS:
+                    {output}
+                    {otherContext}
+
+                    CURRENT CODE:
+                    {currentCode}
+
+                    Return the COMPLETE fixed file. Output ONLY the corrected code.
+                    """;
+
+                var fixResult = await RunPromptAsync($"Fix {fileName}", fixPrompt, ct: ct);
+                if (fixResult.Success && !string.IsNullOrEmpty(fixResult.Output))
+                {
+                    var lang = fileName.EndsWith(".csproj") ? "xml" : "csharp";
+                    var fixedCode = ExtractCode(fixResult.Output, lang);
+                    await File.WriteAllTextAsync(filePath, fixedCode, ct);
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"    ✓ Applied fix to {fileName}");
+                    Console.ResetColor();
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"    ⚠ Fix attempt failed for {fileName}");
+                    Console.ResetColor();
+                }
+            }
+
+            Console.WriteLine();
+        }
+
+        return false;
+    }
+
+    private async Task<(int exitCode, string output)> RunDotnetBuildAsync(CancellationToken ct)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "dotnet",
+            Arguments = "build",
+            WorkingDirectory = _outputDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = System.Diagnostics.Process.Start(psi)!;
+        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
+        var stderr = await process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+
+        return (process.ExitCode, stdout + "\n" + stderr);
+    }
+
+    private static List<string> DetectErrorFiles(string buildOutput)
+    {
+        var files = new List<string>();
+        if (buildOutput.Contains("Program.cs")) files.Add("Program.cs");
+        if (buildOutput.Contains("TodoItem.cs")) files.Add("TodoItem.cs");
+        if (buildOutput.Contains(".csproj")) files.Add("TodoCli.csproj");
+        if (files.Count == 0) files.AddRange(["Program.cs", "TodoItem.cs"]);
+        return files;
+    }
+
+    private async Task<string> GetCrossReferenceContextAsync(string currentFile, CancellationToken ct)
+    {
+        string? otherFile = currentFile switch
+        {
+            "Program.cs" => "TodoItem.cs",
+            "TodoItem.cs" => "Program.cs",
+            _ => null
+        };
+
+        if (otherFile == null) return "";
+
+        var otherPath = Path.Combine(_outputDir, otherFile);
+        if (!File.Exists(otherPath)) return "";
+
+        var content = await File.ReadAllTextAsync(otherPath, ct);
+        return $"\n\nFor reference, here is {otherFile}:\n{content}";
+    }
+
+    // ========================================================================
+    // Code extraction helpers
+    // ========================================================================
+
+    private static string ExtractCode(string response, string language)
+    {
+        var code = response;
+
+        // Remove markdown code fences
+        var fenceMatch = System.Text.RegularExpressions.Regex.Match(
+            code, @"```(?:\w+)?\s*\n([\s\S]*?)\n```");
+        if (fenceMatch.Success)
+            code = fenceMatch.Groups[1].Value;
+
+        // Remove conversational prefixes
+        string[] prefixPatterns = [
+            @"^Here's the .*?:\s*\n",
+            @"^Here is the .*?:\s*\n",
+            @"^Below is .*?:\s*\n",
+            @"^Sure.*?:\s*\n"
+        ];
+        foreach (var pattern in prefixPatterns)
+            code = System.Text.RegularExpressions.Regex.Replace(code, pattern, "");
+
+        if (language == "xml")
+        {
+            var xmlMatch = System.Text.RegularExpressions.Regex.Match(
+                code, @"(<\?xml[\s\S]*|<Project[\s\S]*)");
+            if (xmlMatch.Success)
+                code = xmlMatch.Groups[1].Value;
+        }
+        else if (language == "csharp")
+        {
+            var lines = code.Split('\n');
+            var inCode = false;
+            var validLines = new List<string>();
+            foreach (var line in lines)
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(
+                        line, @"^\s*(using|namespace|public|internal|class|record|enum|//|#|global|\[)") || inCode)
+                {
+                    inCode = true;
+                    validLines.Add(line);
+                }
+            }
+            if (validLines.Count > 0)
+                code = string.Join('\n', validLines);
+        }
+
+        return code.Trim();
+    }
+
+    private static int CountLines(string text) => text.Split('\n').Length;
+
+    // ========================================================================
+    // Prompts
+    // ========================================================================
+
+    private const string CodingSystemPrompt = """
+        You are an expert C# developer acting as an autonomous coding agent.
+        You generate clean, compilable, production-quality C# code.
+
+        Rules:
+        - Output ONLY the raw code for the requested file. No markdown fences, no explanations, no preamble.
+        - Start directly with 'using' statements or XML declarations.
+        - Use modern C# features (top-level statements, records, pattern matching).
+        - All code MUST compile without errors on .NET 8+.
+        - Use System.Text.Json for serialization (no external NuGet packages).
+        - If fixing errors, return the COMPLETE corrected file, not a partial diff.
+        """;
+
+    private static string GetDesignPrompt() => """
+        Design a simple C# command-line Todo application.
+
+        Commands:
+        - todo add "task" [--priority high|medium|low]
+        - todo list [--all | --pending | --completed]
+        - todo complete <id>
+        - todo delete <id>
+
+        Requirements:
+        - Store todos in a local JSON file (todos.json)
+        - Priority levels: Low, Medium, High
+        - Show completion status with checkmarks
+
+        Provide a brief 3-5 bullet point design with file names and purpose.
+        """;
+
+    private static string GetProgramPrompt() => """
+        Generate a complete C# Program.cs for a Todo CLI app.
+
+        Commands:
+        - todo add "task" [--priority high|medium|low]
+        - todo list [--all|--pending|--completed]
+        - todo complete <id>
+        - todo delete <id>
+
+        Requirements:
+        - Top-level statements (no namespace, no Main method wrapper)
+        - Manual argument parsing (no external libraries)
+        - Store in todos.json in current directory
+        - Clean, user-friendly console output with Unicode checkmarks
+        - Reference TodoItem record, Priority enum, and TodoStore class from TodoItem.cs
+
+        Start with 'using' statements. Output ONLY the C# code.
+        """;
+
+    private static string GetModelsPrompt() => """
+        Generate a C# file TodoItem.cs containing:
+
+        1. Priority enum: Low = 0, Medium = 1, High = 2
+        2. TodoItem record with properties:
+           - int Id
+           - string Title
+           - bool IsCompleted
+           - Priority Priority
+           - DateTime CreatedAt
+        3. TodoStore class with static methods:
+           - List<TodoItem> Load(string path) - reads JSON, returns empty list if file missing
+           - void Save(string path, List<TodoItem> items) - writes JSON with WriteIndented = true
+           - int GetNextId(List<TodoItem> items) - returns max Id + 1, or 1 if empty
+
+        Use System.Text.Json with JsonSerializerOptions { WriteIndented = true }.
+        Use JsonStringEnumConverter on the Priority enum.
+        Output ONLY the C# code. Start with 'using' statements.
+        """;
+
+    private static string GetCsprojPrompt() => """
+        Generate a minimal .csproj file for a .NET 8 console application called TodoCli.
+
+        Requirements:
+        - OutputType: Exe
+        - TargetFramework: net8.0
+        - Nullable: enable
+        - ImplicitUsings: enable
+        - No external NuGet packages
+
+        Output ONLY the XML. Start with <Project.
+        """;
+}
+
+// ============================================================================
+// Result types
+// ============================================================================
+
+/// <summary>
+/// Result of the Copilot-only build process.
+/// </summary>
+public class CopilotBuildResult
+{
+    public bool BuildSucceeded { get; set; }
+    public DateTime StartTime { get; set; }
+    public DateTime EndTime { get; set; }
+    public TimeSpan Duration => EndTime - StartTime;
+    public int TotalPrompts { get; set; }
+    public decimal TotalCost { get; set; }
+    public string? ErrorMessage { get; set; }
+
+    public string? DesignOutput { get; set; }
+}
