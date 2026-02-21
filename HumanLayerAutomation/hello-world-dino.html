@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hello World ROAR Dinosaur</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    body {
+      background: #0a0a1a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      border-radius: 16px;
+      box-shadow: 0 0 60px rgba(80,200,80,0.2), 0 0 120px rgba(80,200,80,0.08);
+    }
+  </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+const W = canvas.width  = 900;
+const H = canvas.height = 560;
+const GROUND = 400;
+
+let t            = 0;
+let dinoX        = 420;
+let dinoDir      = 1;    // 1 = facing right, -1 = facing left
+let roarPhase    = 0;    // counts down from ROAR_DURATION to 0
+let roarCooldown = 220;  // frames until next roar starts
+const ROAR_DURATION = 105;
+
+let particles = [];
+
+const clouds = [
+  {x:110, y:68, s:1.0},  {x:360, y:50, s:0.85},
+  {x:620, y:75, s:1.18}, {x:840, y:58, s:0.72}
+];
+
+// ─────────────────────── BACKGROUND ───────────────────────
+function drawBackground() {
+  // Sky
+  const sky = ctx.createLinearGradient(0, 0, 0, GROUND);
+  sky.addColorStop(0, '#1260a8');
+  sky.addColorStop(1, '#82cef4');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, W, GROUND);
+
+  // Sun
+  ctx.save();
+  ctx.shadowColor = '#FFD700';
+  ctx.shadowBlur  = 45;
+  ctx.fillStyle   = '#FFE040';
+  ctx.beginPath();
+  ctx.arc(830, 82, 52, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Clouds
+  clouds.forEach(c => {
+    c.x -= c.s * 0.22;
+    if (c.x < -180) c.x = W + 180;
+    drawCloud(c.x, c.y, c.s);
+  });
+
+  // Distant hills
+  ctx.fillStyle = '#3a8048'; ctx.beginPath();
+  ctx.ellipse(160, GROUND, 210, 100, 0, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = '#2c6838'; ctx.beginPath();
+  ctx.ellipse(490, GROUND, 300, 120, 0, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = '#3a8048'; ctx.beginPath();
+  ctx.ellipse(820, GROUND, 190, 88, 0, Math.PI, 0); ctx.fill();
+
+  // Ground
+  const grd = ctx.createLinearGradient(0, GROUND, 0, H);
+  grd.addColorStop(0,    '#48b03e');
+  grd.addColorStop(0.12, '#389028');
+  grd.addColorStop(1,    '#1c4e16');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, GROUND, W, H - GROUND);
+
+  // Grass tufts
+  ctx.fillStyle = '#5cc848';
+  for (let gx = 0; gx < W; gx += 26) {
+    const gh = 5 + Math.sin(gx * 0.8 + t * 0.025) * 3;
+    ctx.fillRect(gx,     GROUND - gh,      4, gh + 2);
+    ctx.fillRect(gx + 9, GROUND - gh - 3,  3, gh + 3);
+  }
+
+  // Background trees
+  [75, 165, 740, 862].forEach(tx => drawTree(tx, GROUND));
+}
+
+function drawCloud(x, y, s) {
+  const r = 32 * s;
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.beginPath();
+  ctx.arc(x,            y,          r,       0, Math.PI * 2);
+  ctx.arc(x + r,        y - r*0.3,  r*0.72,  0, Math.PI * 2);
+  ctx.arc(x - r*0.82,   y + r*0.1,  r*0.62,  0, Math.PI * 2);
+  ctx.arc(x + r*1.85,   y + r*0.05, r*0.52,  0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawTree(x, gy) {
+  ctx.fillStyle = '#5c3010';
+  ctx.fillRect(x - 7, gy - 58, 14, 58);
+  ctx.fillStyle = '#1e5a14'; ctx.beginPath();
+  ctx.arc(x, gy - 84, 42, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#287a1a'; ctx.beginPath();
+  ctx.arc(x - 16, gy - 100, 30, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#389422'; ctx.beginPath();
+  ctx.arc(x + 12, gy - 106, 26, 0, Math.PI * 2); ctx.fill();
+}
+
+// ──────────────────────── TITLE ────────────────────────
+function drawTitle() {
+  const text    = 'HELLO  WORLD!';
+  const rainbow = ['#FF4444','#FF8800','#FFDD00','#44DD44','#4488FF','#AA44FF','#FF44CC'];
+  ctx.font          = 'bold 58px Impact, "Arial Black", sans-serif';
+  ctx.textAlign     = 'center';
+  ctx.textBaseline  = 'middle';
+
+  const charW  = 42;
+  const totalW = text.length * charW;
+  const startX = W / 2 - totalW / 2 + charW / 2;
+
+  for (let i = 0; i < text.length; i++) {
+    const cx    = startX + i * charW;
+    const cy    = 54 + Math.sin(t * 0.08 + i * 0.55) * 9;
+    const color = rainbow[i % rainbow.length];
+
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillText(text[i], cx + 3, cy + 3);
+
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth   = 5;
+    ctx.strokeText(text[i], cx, cy);
+
+    ctx.fillStyle = color;
+    ctx.fillText(text[i], cx, cy);
+  }
+}
+
+// ─────────────────────── PARTICLES ───────────────────────
+function spawnRoarParticles(wx, wy) {
+  for (let i = 0; i < 7; i++) {
+    particles.push({
+      x: wx + (Math.random() - 0.5) * 24,
+      y: wy + (Math.random() - 0.5) * 24,
+      vx: dinoDir * (3 + Math.random() * 10),
+      vy: (Math.random() - 0.5) * 6 - 0.8,
+      life: 1,
+      decay: 0.016 + Math.random() * 0.024,
+      r: 5 + Math.random() * 14,
+      color: ['#FF4500','#FF6B00','#FFD700','#FF2200','#FF8800','#FFC000'][Math.floor(Math.random()*6)]
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x  += p.vx;
+    p.y  += p.vy;
+    p.vy += 0.15;
+    p.life -= p.decay;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+
+    ctx.globalAlpha = p.life * 0.88;
+    ctx.fillStyle   = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ─────────────────────── ROAR TEXT ───────────────────────
+function drawRoarText() {
+  if (roarPhase <= 0) return;
+  const p = roarPhase / ROAR_DURATION; // 1 → 0 as it plays out
+  if (p > 0.88 || p < 0.08) return;
+
+  const fadeIn  = Math.min(1, (0.88 - p) / 0.1);
+  const fadeOut = Math.min(1, (p - 0.08) / 0.1);
+  const alpha   = Math.min(fadeIn, fadeOut);
+  const scale   = 0.8 + (1 - p) * 1.0 + Math.sin(t * 0.35) * 0.04;
+
+  // World position: beside the dino's mouth
+  const mx = dinoX + dinoDir * 210;
+  const my = GROUND + bobY - 248;
+
+  ctx.save();
+  ctx.translate(mx, my);
+  ctx.scale(scale, scale);
+  ctx.globalAlpha = alpha;
+
+  ctx.font         = 'bold 68px Impact, "Arial Black"';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+
+  const roarColors = ['#FF4500','#FF8000','#FFD700'];
+  const col = roarColors[Math.floor(t / 7) % roarColors.length];
+
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth   = 9;
+  ctx.strokeText('ROAR!', 0, 0);
+  ctx.fillStyle = col;
+  ctx.fillText('ROAR!', 0, 0);
+
+  // Extra bangs
+  ctx.font      = 'bold 38px Impact';
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('!!!', dinoDir * 108, -26);
+
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+// ─────────────────────── DINOSAUR ───────────────────────
+function getMouthAngle() {
+  const maxAngle = 0.78;
+  if (roarPhase <= 0) {
+    return 0.04 + Math.abs(Math.sin(t * 0.042)) * 0.055; // gentle idle chewing
+  }
+  const p = roarPhase / ROAR_DURATION; // 1 → 0
+  if (p > 0.80) return ((1 - p) / 0.20) * maxAngle;           // opening
+  if (p > 0.20) return maxAngle + Math.sin(t * 0.38) * 0.07;  // roaring (quiver)
+  return (p / 0.20) * maxAngle;                                // closing
+}
+
+function drawDino() {
+  bobY = Math.sin(t * 0.11) * 5;
+  const legSwing = Math.sin(t * 0.11) * 28 * Math.PI / 180;
+  const mouth    = getMouthAngle();
+
+  ctx.save();
+  ctx.translate(dinoX, GROUND + bobY);
+  ctx.scale(dinoDir, 1); // flip when walking left
+
+  // Everything below is drawn facing RIGHT in local coords.
+  // Pivot (0,0) is at the dino's hip/feet level.
+
+  drawTail();
+  drawLeg(-28, -85,  legSwing);   // back leg
+  drawBody(mouth);
+  drawLeg( 18, -85, -legSwing);   // front leg
+
+  ctx.restore();
+}
+
+function drawTail() {
+  const wave = Math.sin(t * 0.09);
+  ctx.fillStyle = '#267a26';
+  ctx.beginPath();
+  ctx.moveTo(-50, -125);
+  ctx.quadraticCurveTo(-115, -95 + wave * 9,  -175, -55 + Math.cos(t * 0.07) * 11);
+  ctx.quadraticCurveTo(-188, -40,              -178, -32);
+  ctx.quadraticCurveTo(-158, -46,              -105, -72);
+  ctx.quadraticCurveTo( -62, -98,               -44, -112);
+  ctx.closePath();
+  ctx.fill();
+
+  // Tail spines
+  ctx.fillStyle = '#185018';
+  for (let i = 0; i < 5; i++) {
+    const sx = -85 - i * 18;
+    const sy = -98 + i * 7 + wave * (i + 1) * 2.5;
+    ctx.beginPath();
+    ctx.moveTo(sx - 6, sy);
+    ctx.lineTo(sx,     sy - 14 + i * 1.5);
+    ctx.lineTo(sx + 6, sy);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawBody(mouthAngle) {
+  // Main body
+  ctx.fillStyle = '#267a26';
+  ctx.beginPath();
+  ctx.ellipse(0, -135, 88, 60, 0.08, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Belly (pale)
+  ctx.fillStyle = '#90c878';
+  ctx.beginPath();
+  ctx.ellipse(12, -115, 48, 38, 0.18, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Back spines
+  ctx.fillStyle = '#185018';
+  for (let i = 0; i < 6; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-28 + i * 11, -188);
+    ctx.lineTo(-22 + i * 11, -205 + i * 1.5);
+    ctx.lineTo(-16 + i * 11, -188);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Tiny arm
+  ctx.save();
+  ctx.translate(58, -148);
+  ctx.rotate(0.38);
+  ctx.fillStyle = '#267a26';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 10, 22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#184818';
+  ctx.beginPath(); ctx.ellipse( 6, 19, 4, 8, 0.4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-1, 21, 4, 7, 0.0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+
+  // Neck
+  ctx.fillStyle = '#267a26';
+  ctx.beginPath();
+  ctx.moveTo(42, -178);
+  ctx.lineTo(78, -232);
+  ctx.lineTo(98, -226);
+  ctx.lineTo(62, -174);
+  ctx.closePath();
+  ctx.fill();
+
+  // HEAD
+  drawHead(mouthAngle);
+}
+
+function drawHead(mouthAngle) {
+  ctx.save();
+  ctx.translate(92, -258);
+
+  // Skull
+  ctx.fillStyle = '#267a26';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 44, 32, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Brow ridge
+  ctx.fillStyle = '#185018';
+  ctx.beginPath();
+  ctx.ellipse(-14, -20, 18, 9, 0.22, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Head spines
+  ctx.fillStyle = '#185018';
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-28 + i * 14, -26);
+    ctx.lineTo(-22 + i * 14, -44);
+    ctx.lineTo(-16 + i * 14, -26);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Eye
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(-14, -12, 13, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = roarPhase > 0 ? '#cc1100' : '#111';
+  ctx.beginPath(); ctx.arc(-12, -12,  8, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc( -8, -16,  3, 0, Math.PI * 2); ctx.fill();
+  // Eye glow when roaring
+  if (roarPhase > 0 && (roarPhase / ROAR_DURATION) < 0.85) {
+    ctx.fillStyle = 'rgba(255,80,0,0.3)';
+    ctx.beginPath(); ctx.arc(-12, -12, 14, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // UPPER JAW / SNOUT
+  ctx.fillStyle = '#267a26';
+  ctx.beginPath();
+  ctx.moveTo(12, 5);
+  ctx.lineTo(78, 8);
+  ctx.lineTo(80, 22);
+  ctx.lineTo(10, 20);
+  ctx.closePath();
+  ctx.fill();
+
+  // Upper teeth (shown when mouth open)
+  if (mouthAngle > 0.06) {
+    ctx.fillStyle = '#fffee0';
+    for (let i = 0; i < 6; i++) {
+      ctx.beginPath();
+      ctx.moveTo(12 + i * 11, 20);
+      ctx.lineTo(16 + i * 11, 20 + 12 * mouthAngle);
+      ctx.lineTo(20 + i * 11, 20);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // Nostril
+  ctx.fillStyle = '#185018';
+  ctx.beginPath();
+  ctx.ellipse(62, -4, 5, 4, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // LOWER JAW (pivots at back of jaw)
+  ctx.save();
+  ctx.translate(32, 18);
+  ctx.rotate(mouthAngle);
+
+  ctx.fillStyle = '#1e6a1e';
+  ctx.beginPath();
+  ctx.moveTo(-22, 0);
+  ctx.lineTo(46,  0);
+  ctx.lineTo(48, 13);
+  ctx.lineTo(-20, 13);
+  ctx.closePath();
+  ctx.fill();
+
+  // Lower teeth
+  if (mouthAngle > 0.06) {
+    ctx.fillStyle = '#fffee0';
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-18 + i * 12, 0);
+      ctx.lineTo(-14 + i * 12, -11 * mouthAngle);
+      ctx.lineTo(-10 + i * 12, 0);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // Inside mouth / tongue
+  if (mouthAngle > 0.12) {
+    // Red mouth interior
+    ctx.fillStyle = '#cc1111';
+    ctx.beginPath();
+    ctx.ellipse(20, -4, 24 * mouthAngle, 10 * mouthAngle, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Tongue
+    ctx.fillStyle = '#ff5555';
+    ctx.beginPath();
+    ctx.ellipse(36, 1 + 10 * mouthAngle, 10, 8 * mouthAngle, 0.15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore(); // lower jaw
+
+  ctx.restore(); // head
+}
+
+function drawLeg(x, y, angle) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+
+  // Thigh
+  ctx.fillStyle = '#1e6e1e';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 18, 42, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Shin
+  ctx.save();
+  ctx.translate(6, 68);
+  ctx.rotate(-angle * 0.65);
+  ctx.fillStyle = '#267a26';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 13, 36, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Foot
+  ctx.save();
+  ctx.translate(9, 42);
+  ctx.fillStyle = '#1e6e1e';
+  ctx.beginPath();
+  ctx.ellipse(8, 0, 23, 11, 0.1, 0, Math.PI * 2);
+  ctx.fill();
+  // Toe claws
+  ctx.fillStyle = '#0e3e0e';
+  for (let c = 0; c < 3; c++) {
+    ctx.beginPath();
+    ctx.ellipse(-4 + c * 11, 10, 4, 9, -0.12 + c * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.restore();
+
+  ctx.restore();
+}
+
+// ─────────────────────── MAIN LOOP ───────────────────────
+function update() {
+  t++;
+  bobY = Math.sin(t * 0.11) * 5;
+
+  // Walk
+  dinoX += dinoDir * 1.4;
+  if (dinoX > 680) dinoDir = -1;
+  if (dinoX < 220) dinoDir =  1;
+
+  // Roar logic
+  if (roarPhase > 0) {
+    roarPhase--;
+    // Spawn fire particles from mouth during active roar window
+    const p = roarPhase / ROAR_DURATION;
+    if (p < 0.82 && p > 0.18 && Math.random() < 0.45) {
+      const mx = dinoX + dinoDir * 202;
+      const my = GROUND + bobY - 244;
+      spawnRoarParticles(mx, my);
+    }
+  } else {
+    roarCooldown--;
+    if (roarCooldown <= 0) {
+      roarPhase    = ROAR_DURATION;
+      roarCooldown = 190 + Math.floor(Math.random() * 60);
+    }
+  }
+}
+
+function frame() {
+  ctx.clearRect(0, 0, W, H);
+
+  update();
+  drawBackground();
+  drawTitle();
+  drawDino();
+  updateParticles();
+  drawRoarText();
+
+  requestAnimationFrame(frame);
+}
+
+frame();
+</script>
+</body>
+</html>

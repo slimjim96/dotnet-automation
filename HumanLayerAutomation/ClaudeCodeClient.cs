@@ -106,9 +106,12 @@ public class ClaudeCodeClient : IDisposable
             }
         }
 
+        // Success requires both: exit code 0 AND no is_error flag in JSON result
+        var success = result.ExitCode == 0 && !(jsonResult?.IsError ?? false);
+
         return new ClaudeResult
         {
-            Success = result.ExitCode == 0,
+            Success = success,
             ExitCode = result.ExitCode,
             Output = result.Output,
             Error = result.Error,

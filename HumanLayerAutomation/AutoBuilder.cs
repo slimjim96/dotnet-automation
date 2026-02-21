@@ -115,12 +115,13 @@ public class AutoBuilder
                 ? "PHASE 2: Executing plan..."
                 : "PHASE 3: Executing plan...");
 
-            foreach (var step in plan.Steps)
+            for (int stepIndex = 0; stepIndex < plan.Steps.Count; stepIndex++)
             {
                 if (ct.IsCancellationRequested) break;
 
+                var step = plan.Steps[stepIndex];
                 Log($"  → {step}");
-                var stepResult = await ExecuteStepAsync(step, result.CodebaseAnalysis, ct);
+                var stepResult = await ExecuteStepAsync(step, stepIndex, plan.Steps, result.ExecutedSteps, result.CodebaseAnalysis, ct);
                 result.ExecutedSteps.Add(stepResult);
 
                 if (!stepResult.Success)
@@ -297,11 +298,23 @@ Output ONLY a numbered list of steps, nothing else. Example:
     }
 
     /// <summary>
-    /// Execute a single step of the plan.
+    /// Execute a single step of the plan with accumulated context from prior steps.
     /// </summary>
-    private async Task<StepResult> ExecuteStepAsync(string step, CodebaseAnalysis? analysis, CancellationToken ct)
+    private async Task<StepResult> ExecuteStepAsync(
+        string step,
+        int stepIndex,
+        List<string> allSteps,
+        List<StepResult> completedSteps,
+        CodebaseAnalysis? analysis,
+        CancellationToken ct)
     {
         var stepResult = new StepResult { Step = step, StartTime = DateTime.UtcNow };
+
+        // Build the full plan context so Claude knows what's been done and what's coming
+        var planContext = BuildPlanContext(stepIndex, allSteps, completedSteps);
+
+        // List files already in the target directory
+        var existingFiles = GetExistingFilesSummary();
 
         // Determine what kind of step this is
         var isFileCreation = step.Contains("Create", StringComparison.OrdinalIgnoreCase) ||
@@ -323,12 +336,18 @@ Output ONLY a numbered list of steps, nothing else. Example:
 
 Working directory: {_config.TargetPath}
 
-Task: {step}
+OVERALL GOAL: {_config.Description}
 
-Context: {_config.Description}
+{planContext}
+
+{existingFiles}
+
+YOUR CURRENT TASK (step {stepIndex + 1}): {step}
 
 {(analysis?.Conventions != null ? $"Follow these conventions:\n{analysis.Conventions}" : "")}
 
+IMPORTANT: Before creating or modifying files, use Read to check any existing files that your code depends on.
+Use the EXACT types, method signatures, and namespaces from existing files.
 Execute this step by creating or modifying the necessary files.
 Use the Write or Edit tool to make changes.
 ";
@@ -342,9 +361,16 @@ Use the Write or Edit tool to make changes.
 
 Working directory: {_config.TargetPath}
 
-Task: {step}
+OVERALL GOAL: {_config.Description}
+
+{planContext}
+
+{existingFiles}
+
+YOUR CURRENT TASK (step {stepIndex + 1}): {step}
 
 Execute this step. If it requires code changes, use the appropriate tools.
+Read existing files first to understand the current state.
 ";
             allowedTools = ["Read", "Glob", "Grep", "Write", "Edit", "Bash"];
         }
@@ -352,10 +378,30 @@ Execute this step. If it requires code changes, use the appropriate tools.
         var result = await RunClaudeAsync(prompt, allowedTools: allowedTools, ct: ct);
 
         stepResult.Cost = result.CostUsd ?? 0;
-        stepResult.Success = result.Success;
         stepResult.Output = result.Output;
-        stepResult.ErrorMessage = result.Error;
         stepResult.EndTime = DateTime.UtcNow;
+
+        // Detect permission-blocked responses (AutoApprove not enabled or path not writable)
+        if (result.Success && result.IsPermissionRequest)
+        {
+            stepResult.Success = false;
+            stepResult.ErrorMessage = "Claude was blocked by tool permissions and could not write files. " +
+                                      "Ensure FullyAutonomous=true in BuildConfig or set AUTO_APPROVE=true.";
+            _logger?.LogWarning("Step '{Step}' blocked by permissions, treating as failure", step);
+        }
+        // Detect questioning responses — treat as failure so recovery logic kicks in
+        else if (result.Success && result.IsQuestioningResponse)
+        {
+            stepResult.Success = false;
+            stepResult.ErrorMessage = "Claude asked clarifying questions instead of completing the step. " +
+                                      "Must proceed with reasonable assumptions.";
+            _logger?.LogWarning("Step '{Step}' returned questioning response, treating as failure", step);
+        }
+        else
+        {
+            stepResult.Success = result.Success;
+            stepResult.ErrorMessage = result.Error;
+        }
 
         return stepResult;
     }
@@ -365,27 +411,43 @@ Execute this step. If it requires code changes, use the appropriate tools.
     /// </summary>
     private async Task<bool> TryRecoverAsync(StepResult failedStep, CancellationToken ct)
     {
+        var isQuestionFailure = failedStep.ErrorMessage?.Contains("clarifying questions") == true;
+
         for (int attempt = 1; attempt <= _config.MaxRetries; attempt++)
         {
+            var questionRecovery = isQuestionFailure
+                ? "\n\nIMPORTANT: The previous attempt FAILED because you asked clarifying questions. " +
+                  "This is a fully automated pipeline — there is NO human to answer. " +
+                  "You MUST make reasonable assumptions and complete the task. Do NOT ask questions."
+                : "";
+
             var prompt = $@"
 {GetContextPrompts()}
 
 The previous step failed:
 Step: {failedStep.Step}
 Error: {failedStep.ErrorMessage}
-Output: {failedStep.Output}
+{questionRecovery}
 
-Please analyze the error and fix it. This is attempt {attempt} of {_config.MaxRetries}.
+Please analyze the error and fix it. This is recovery attempt {attempt} of {_config.MaxRetries}.
+Execute this step by creating or modifying the necessary files. Use the Write or Edit tool to make changes.
 ";
 
             var result = await RunClaudeAsync(prompt,
                 allowedTools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
                 ct: ct);
 
-            if (result.Success)
+            // Check both exit-code success AND content-level success
+            if (result.Success && !result.IsQuestioningResponse)
             {
                 failedStep.RecoveryAttempts = attempt;
                 return true;
+            }
+
+            if (result.IsQuestioningResponse)
+            {
+                _logger?.LogWarning("Recovery attempt {Attempt}: Claude asked questions again", attempt);
+                isQuestionFailure = true; // Ensure next attempt includes stronger instructions
             }
         }
 
@@ -421,9 +483,12 @@ Fix all build errors. Use Edit or Write tools to modify the files.
                 allowedTools: ["Read", "Glob", "Write", "Edit"],
                 ct: ct);
 
-            if (!result.Success)
+            if (!result.Success || result.IsQuestioningResponse)
             {
-                Log($"      Fix attempt failed: {result.Error}");
+                var reason = result.IsQuestioningResponse
+                    ? "Claude asked questions instead of fixing the build"
+                    : result.Error;
+                Log($"      Fix attempt failed: {reason}");
             }
         }
 
@@ -469,12 +534,72 @@ Fix all build errors. Use Edit or Write tools to modify the files.
             AutoApprove = _config.FullyAutonomous,
             WorkingDir = _config.TargetPath,
             AllowedTools = allowedTools?.ToList(),
-            OutputFormat = "json"
+            OutputFormat = "json",
+            AppendSystemPrompt = ResponseValidator.NoQuestionsPrompt
         };
 
         var result = await _client.RunAsync(prompt, options, ct);
         _totalCost += result.CostUsd ?? 0;
         return result;
+    }
+
+    /// <summary>
+    /// Build a summary of the full plan showing completed, current, and upcoming steps.
+    /// </summary>
+    private static string BuildPlanContext(int currentIndex, List<string> allSteps, List<StepResult> completedSteps)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("BUILD PLAN PROGRESS:");
+
+        for (int i = 0; i < allSteps.Count; i++)
+        {
+            if (i < completedSteps.Count)
+            {
+                var completed = completedSteps[i];
+                var status = completed.Success ? "DONE" : "FAILED";
+                sb.AppendLine($"  [{status}] Step {i + 1}: {allSteps[i]}");
+            }
+            else if (i == currentIndex)
+            {
+                sb.AppendLine($"  [NOW]  Step {i + 1}: {allSteps[i]}");
+            }
+            else
+            {
+                sb.AppendLine($"  [TODO] Step {i + 1}: {allSteps[i]}");
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// List files that already exist in the target directory (so Claude knows what's been created).
+    /// </summary>
+    private string GetExistingFilesSummary()
+    {
+        try
+        {
+            var files = Directory.GetFiles(_config.TargetPath, "*.*", SearchOption.AllDirectories)
+                .Where(f => !f.Contains("bin") && !f.Contains("obj") && !f.Contains(".git"))
+                .Select(f => Path.GetRelativePath(_config.TargetPath, f))
+                .ToList();
+
+            if (files.Count == 0)
+                return "EXISTING FILES: (none yet - this is a fresh directory)";
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"EXISTING FILES IN {_config.TargetPath} ({files.Count} files):");
+            foreach (var file in files)
+            {
+                sb.AppendLine($"  - {file}");
+            }
+            sb.AppendLine("Use Read tool to inspect these files before creating code that depends on them.");
+            return sb.ToString();
+        }
+        catch
+        {
+            return "EXISTING FILES: (could not list directory)";
+        }
     }
 
     private string GetContextPrompts()

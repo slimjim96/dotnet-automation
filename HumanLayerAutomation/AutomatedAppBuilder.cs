@@ -58,11 +58,13 @@ public class AutomatedAppBuilder
             Console.WriteLine($"  ✓ Design complete ({design.Duration.TotalSeconds:F1}s, ${design.Cost:F4})");
             Console.WriteLine();
 
-            // Phase 2: Generate each file
+            // Phase 2: Generate each file (with cross-file context)
             Console.WriteLine("PHASE 2: Code Generation");
             Console.WriteLine("─".PadRight(60, '─'));
 
             var files = GetFilesToGenerate(spec);
+            var generatedFiles = new Dictionary<string, string>(); // fileName -> code
+
             foreach (var file in files)
             {
                 Console.WriteLine($"  Generating {file.FileName}...");
@@ -71,6 +73,7 @@ public class AutomatedAppBuilder
                     file,
                     spec,
                     design.Output,
+                    generatedFiles,
                     ct);
 
                 result.Steps.Add(codeStep);
@@ -79,6 +82,7 @@ public class AutomatedAppBuilder
                 {
                     var filePath = Path.Combine(spec.OutputDirectory, file.FileName);
                     await File.WriteAllTextAsync(filePath, codeStep.CleanedCode!, ct);
+                    generatedFiles[file.FileName] = codeStep.CleanedCode!;
                     Console.WriteLine($"    ✓ {file.FileName} ({codeStep.CleanedCode!.Split('\n').Length} lines, ${codeStep.Cost:F4})");
                 }
                 else
@@ -168,7 +172,8 @@ public class AutomatedAppBuilder
                 Model = _options.Model,
                 MaxTurns = _options.MaxTurns,
                 AutoApprove = true,
-                OutputFormat = "json"
+                OutputFormat = "json",
+                AppendSystemPrompt = ResponseValidator.NoQuestionsPrompt
             }, ct);
 
             step.Cost += result.CostUsd ?? 0;
@@ -178,6 +183,28 @@ public class AutomatedAppBuilder
             {
                 lastError = $"Claude returned error: {result.Error}";
                 _logger?.LogWarning("Attempt {Attempt} failed: {Error}", attempt, lastError);
+                continue;
+            }
+
+            // Detect permission-blocked responses
+            if (result.IsPermissionRequest)
+            {
+                lastError = "You were blocked by tool permissions and could not write files. " +
+                            "This is an automated pipeline with AutoApprove enabled — " +
+                            "you have full permission to use Write, Edit, and Bash tools. " +
+                            "Proceed with the implementation without asking for approval.";
+                _logger?.LogWarning("Attempt {Attempt}: Claude was blocked by permissions", attempt);
+                continue;
+            }
+
+            // Detect questioning responses (Claude asking for clarification instead of doing work)
+            if (result.IsQuestioningResponse)
+            {
+                lastError = "You asked clarifying questions instead of completing the task. " +
+                            "This is an automated pipeline with no human to respond. " +
+                            "Make reasonable assumptions and proceed with the implementation. " +
+                            "Do NOT ask questions — just produce the requested output.";
+                _logger?.LogWarning("Attempt {Attempt}: Claude asked questions instead of completing work", attempt);
                 continue;
             }
 
@@ -215,14 +242,16 @@ public class AutomatedAppBuilder
 
     /// <summary>
     /// Generate a code file with validation and retry.
+    /// Includes already-generated files as context so Claude can reference actual types/methods.
     /// </summary>
     private async Task<BuildStep> GenerateCodeFileAsync(
         FileSpec file,
         AppSpec spec,
         string? designContext,
+        Dictionary<string, string> generatedFiles,
         CancellationToken ct)
     {
-        var prompt = GetCodeGenerationPrompt(file, spec, designContext);
+        var prompt = GetCodeGenerationPrompt(file, spec, designContext, generatedFiles);
 
         return await GenerateWithRetryAsync(
             $"generate:{file.FileName}",
@@ -509,12 +538,31 @@ Provide a brief design (5-7 bullet points) covering:
 Keep it minimal and focused.
 ";
 
-    private string GetCodeGenerationPrompt(FileSpec file, AppSpec spec, string? designContext) => $@"
+    private string GetCodeGenerationPrompt(FileSpec file, AppSpec spec, string? designContext, Dictionary<string, string>? generatedFiles = null)
+    {
+        // Build cross-file context from already-generated files
+        var existingFilesContext = "";
+        if (generatedFiles?.Count > 0)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("ALREADY GENERATED FILES (use these exact types, methods, and signatures):");
+            foreach (var (fileName, code) in generatedFiles)
+            {
+                sb.AppendLine($"\n--- {fileName} ---");
+                sb.AppendLine(code);
+                sb.AppendLine($"--- end {fileName} ---");
+            }
+            existingFilesContext = sb.ToString();
+        }
+
+        return $@"
 Generate the file: {file.FileName}
 
 Purpose: {file.Purpose}
 
 {(designContext != null ? $"Design context:\n{designContext}\n" : "")}
+
+{existingFilesContext}
 
 Requirements:
 - Target framework: {spec.Framework}
@@ -523,13 +571,14 @@ Requirements:
 CRITICAL IMPLEMENTATION REQUIREMENTS:
 - This must be FULLY FUNCTIONAL code, not stubs or placeholders
 - All methods must have complete implementations that actually work
-- If the code references other files (like TodoStore), the functionality must be used
+- If the code references other files, use the EXACT class names, method signatures, and namespaces from the already-generated files above
 - Data persistence means actually reading/writing to files, not just printing messages
 - Do not skip any functionality - implement everything specified
 
 IMPORTANT: Output ONLY the code. No explanations, no markdown fences, no commentary.
 Start directly with the code (e.g., 'using System;' for C# or '<Project' for csproj).
 ";
+    }
 
     private string GetFixPrompt(string fileName, string currentCode, string errors) => $@"
 Fix the following build errors in {fileName}:

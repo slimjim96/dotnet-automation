@@ -32,11 +32,11 @@ There are no tests in this project.
 
 ### Core Layer
 - **`ClaudeCodeClient`** (`ClaudeCodeClient.cs`) - Central class. Wraps Claude CLI via `System.Diagnostics.Process`. Builds CLI arguments (`--print`, `--model`, `--output-format json`, `--dangerously-skip-permissions`, etc.), parses JSON results. Supports `RunAsync` (batch), `RunStreamingAsync` (real-time output), `RunTaskAsync` (high-level), and `ContinueSessionAsync` (session resume). Implements `IDisposable` to kill child processes.
-- **`Models.cs`** - All data models in one file: `ClaudeOptions`, `ClaudeResult`, `ClaudeJsonResult`, `AutomationTask`, `TaskResult`, `ScheduledTask`, `ClaudeStreamEvent`, `ToolPermissionRequest`, `ToolRiskLevel` enum, `ToolClassification` (static risk categorization of Claude tools).
+- **`Models.cs`** - All data models in one file: `ClaudeOptions`, `ClaudeResult`, `ClaudeJsonResult`, `AutomationTask`, `TaskResult`, `ScheduledTask`, `ClaudeStreamEvent`, `ToolPermissionRequest`, `ToolRiskLevel` enum, `ToolClassification` (static risk categorization of Claude tools), `ResponseValidator` (detects questioning AI responses and provides the no-questions system prompt).
 
 ### Builder Layer (two builders)
-- **`AutomatedAppBuilder`** (`AutomatedAppBuilder.cs`) - Spec-driven builder with self-healing. Takes an `AppSpec` (explicit file list with requirements), generates code in phases (Design → Generate per file → Build → Fix), retries on errors by feeding build output back to Claude.
-- **`AutoBuilder`** (`AutoBuilder.cs`) - Scenario-based autonomous builder. Uses `BuildConfig` with scenario (new/update/add), strategy (first/efficient/thorough/balanced), and scope (component/core/full). More flexible, single-prompt approach.
+- **`AutomatedAppBuilder`** (`AutomatedAppBuilder.cs`) - Spec-driven builder with self-healing. Takes an `AppSpec` (explicit file list with requirements), generates code in phases (Design → Generate per file → Build → Fix), retries on errors by feeding build output back to Claude. Passes already-generated file contents as cross-file context so later files reference exact types/signatures.
+- **`AutoBuilder`** (`AutoBuilder.cs`) - Scenario-based autonomous builder. Uses `BuildConfig` with scenario (new/update/add), strategy (first/efficient/thorough/balanced), and scope (component/core/full). Each step receives accumulated context: full plan progress (DONE/NOW/TODO), existing files listing, and instructions to Read existing files before creating dependent code.
 - **`BuildConfig.cs`** - Enums (`BuildScenario`, `DecisionStrategy`, `BuildScope`) and configuration for `AutoBuilder`.
 - **`TaskConfig.cs`** - JSON-serializable task configuration with `TaskConfigLoader` for file-based build configs and `TaskRegistry` for tracking build status.
 
@@ -63,3 +63,5 @@ There are no tests in this project.
 - The project targets `net10.0` with `LangVersion=preview`, nullable enabled, implicit usings enabled.
 - Root namespace is `HumanLayerAutomation`. Sub-namespaces: `.Providers`, `.Models`, `.Notifications`, `.Health`.
 - The `generated/` directory is excluded from compilation (used for builder output).
+- **Questioning response recovery**: Both builders detect when Claude asks questions instead of completing work. `ResponseValidator.IsQuestioningResponse` checks for clarification phrases and question-mark density. Detected questioning responses trigger retry with escalating "no questions" instructions. `ResponseValidator.NoQuestionsPrompt` is appended to all builder invocations via `AppendSystemPrompt`.
+- `ClaudeCodeClient.RunAsync` checks both exit code AND `ClaudeJsonResult.IsError` to determine success.
